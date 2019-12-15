@@ -31,10 +31,9 @@ void HttpSimpleControllersRouter::registerHttpSimpleController(
 {
     assert(!pathName.empty());
     assert(!ctrlName.empty());
-
     std::string path(pathName);
     std::transform(pathName.begin(), pathName.end(), path.begin(), tolower);
-    std::lock_guard<std::mutex> guard(_simpCtrlMutex);
+    std::lock_guard<std::mutex> guard(simpleCtrlMutex_);
     std::vector<HttpMethod> validMethods;
     std::vector<std::string> filters;
     for (auto const &filterOrMethod : filtersAndMethods)
@@ -53,33 +52,38 @@ void HttpSimpleControllersRouter::registerHttpSimpleController(
             exit(1);
         }
     }
-    auto &item = _simpCtrlMap[path];
+    auto &item = simpleCtrlMap_[path];
     auto binder = std::make_shared<CtrlBinder>();
-    binder->_controllerName = ctrlName;
-    binder->_filterNames = filters;
-    auto &_object = DrClassMap::getSingleInstance(ctrlName);
-    auto controller =
-        std::dynamic_pointer_cast<HttpSimpleControllerBase>(_object);
-    binder->_controller = controller;
+    binder->controllerName_ = ctrlName;
+    binder->filterNames_ = filters;
+    drogon::app().getLoop()->queueInLoop([binder, ctrlName]() {
+        auto &object_ = DrClassMap::getSingleInstance(ctrlName);
+        auto controller =
+            std::dynamic_pointer_cast<HttpSimpleControllerBase>(object_);
+        binder->controller_ = controller;
+        // Recreate this with the correct number of threads.
+        binder->responseCache_ = IOThreadStorage<HttpResponsePtr>();
+    });
+
     if (validMethods.size() > 0)
     {
         for (auto const &method : validMethods)
         {
-            item._binders[method] = binder;
+            item.binders_[method] = binder;
             if (method == Options)
             {
-                binder->_isCORS = true;
+                binder->isCORS_ = true;
             }
         }
     }
     else
     {
         // All HTTP methods are valid
-        for (size_t i = 0; i < Invalid; i++)
+        for (size_t i = 0; i < Invalid; ++i)
         {
-            item._binders[i] = binder;
+            item.binders_[i] = binder;
         }
-        binder->_isCORS = true;
+        binder->isCORS_ = true;
     }
 }
 
@@ -92,12 +96,12 @@ void HttpSimpleControllersRouter::route(
                    req->path().end(),
                    pathLower.begin(),
                    tolower);
-    auto iter = _simpCtrlMap.find(pathLower);
-    if (iter != _simpCtrlMap.end())
+    auto iter = simpleCtrlMap_.find(pathLower);
+    if (iter != simpleCtrlMap_.end())
     {
         auto &ctrlInfo = iter->second;
         req->setMatchedPathPattern(iter->first);
-        auto &binder = ctrlInfo._binders[req->method()];
+        auto &binder = ctrlInfo.binders_[req->method()];
         if (!binder)
         {
             // Invalid Http Method
@@ -114,15 +118,15 @@ void HttpSimpleControllersRouter::route(
             return;
         }
         // Do post routing advices.
-        if (!_postRoutingObservers.empty())
+        if (!postRoutingObservers_.empty())
         {
-            for (auto &observer : _postRoutingObservers)
+            for (auto &observer : postRoutingObservers_)
             {
                 observer(req);
             }
         }
-        auto &filters = ctrlInfo._binders[req->method()]->_filters;
-        if (_postRoutingAdvices.empty())
+        auto &filters = ctrlInfo.binders_[req->method()]->filters_;
+        if (postRoutingAdvices_.empty())
         {
             if (!filters.empty())
             {
@@ -152,7 +156,7 @@ void HttpSimpleControllersRouter::route(
                 std::make_shared<std::function<void(const HttpResponsePtr &)>>(
                     std::move(callback));
             doAdvicesChain(
-                _postRoutingAdvices,
+                postRoutingAdvices_,
                 0,
                 req,
                 callbackPtr,
@@ -183,40 +187,42 @@ void HttpSimpleControllersRouter::route(
         }
         return;
     }
-    _httpCtrlsRouter.route(req, std::move(callback));
+    httpCtrlsRouter_.route(req, std::move(callback));
 }
 
 void HttpSimpleControllersRouter::doControllerHandler(
     const CtrlBinderPtr &ctrlBinderPtr,
-    const SimpleControllerRouterItem &routerItem,
     const HttpRequestImplPtr &req,
     std::function<void(const HttpResponsePtr &)> &&callback)
 {
-    auto &controller = ctrlBinderPtr->_controller;
+    auto &controller = ctrlBinderPtr->controller_;
     if (controller)
     {
-        if (ctrlBinderPtr->_hasCachedResponse)
+        auto &responsePtr = *(ctrlBinderPtr->responseCache_);
+        if (responsePtr)
         {
-            HttpResponsePtr &responsePtr =
-                ctrlBinderPtr->_responsePtrMap[req->getLoop()];
-            if (responsePtr &&
-                (responsePtr->expiredTime() == 0 ||
-                 (trantor::Date::now() < responsePtr->creationDate().after(
-                                             responsePtr->expiredTime()))))
+            if (responsePtr->expiredTime() == 0 ||
+                (trantor::Date::now() <
+                 responsePtr->creationDate().after(responsePtr->expiredTime())))
             {
                 // use cached response!
                 LOG_TRACE << "Use cached response";
                 invokeCallback(callback, req, responsePtr);
                 return;
             }
-            ctrlBinderPtr->_hasCachedResponse = false;
+            else
+            {
+                responsePtr.reset();
+            }
         }
+
         controller->asyncHandleHttpRequest(
             req,
             [this, req, callback = std::move(callback), &ctrlBinderPtr](
                 const HttpResponsePtr &resp) {
                 auto newResp = resp;
-                if (resp->expiredTime() >= 0)
+                if (resp->expiredTime() >= 0 &&
+                    resp->statusCode() != k404NotFound)
                 {
                     // cache the response;
                     static_cast<HttpResponseImpl *>(resp.get())
@@ -225,14 +231,12 @@ void HttpSimpleControllersRouter::doControllerHandler(
 
                     if (loop->isInLoopThread())
                     {
-                        ctrlBinderPtr->_responsePtrMap[loop] = resp;
-                        ctrlBinderPtr->_hasCachedResponse = true;
+                        ctrlBinderPtr->responseCache_.setThreadData(resp);
                     }
                     else
                     {
-                        loop->queueInLoop([loop, resp, &ctrlBinderPtr]() {
-                            ctrlBinderPtr->_responsePtrMap[loop] = resp;
-                            ctrlBinderPtr->_hasCachedResponse = true;
+                        loop->queueInLoop([resp, &ctrlBinderPtr]() {
+                            ctrlBinderPtr->responseCache_.setThreadData(resp);
                         });
                     }
                 }
@@ -243,7 +247,7 @@ void HttpSimpleControllersRouter::doControllerHandler(
     }
     else
     {
-        const std::string &ctrlName = ctrlBinderPtr->_controllerName;
+        const std::string &ctrlName = ctrlBinderPtr->controllerName_;
         LOG_ERROR << "can't find controller " << ctrlName;
         auto res = drogon::HttpResponse::newNotFoundResponse();
         invokeCallback(callback, req, res);
@@ -254,17 +258,17 @@ std::vector<std::tuple<std::string, HttpMethod, std::string>>
 HttpSimpleControllersRouter::getHandlersInfo() const
 {
     std::vector<std::tuple<std::string, HttpMethod, std::string>> ret;
-    for (auto &item : _simpCtrlMap)
+    for (auto &item : simpleCtrlMap_)
     {
-        for (size_t i = 0; i < Invalid; i++)
+        for (size_t i = 0; i < Invalid; ++i)
         {
-            if (item.second._binders[i])
+            if (item.second.binders_[i])
             {
                 auto info = std::tuple<std::string, HttpMethod, std::string>(
                     item.first,
                     (HttpMethod)i,
                     std::string("HttpSimpleController: ") +
-                        item.second._binders[i]->_controllerName);
+                        item.second.binders_[i]->controllerName_);
                 ret.emplace_back(std::move(info));
             }
         }
@@ -275,20 +279,16 @@ HttpSimpleControllersRouter::getHandlersInfo() const
 void HttpSimpleControllersRouter::init(
     const std::vector<trantor::EventLoop *> &ioLoops)
 {
-    for (auto &iter : _simpCtrlMap)
+    for (auto &iter : simpleCtrlMap_)
     {
         auto &item = iter.second;
-        for (size_t i = 0; i < Invalid; i++)
+        for (size_t i = 0; i < Invalid; ++i)
         {
-            auto &binder = item._binders[i];
+            auto &binder = item.binders_[i];
             if (binder)
             {
-                binder->_filters =
-                    filters_function::createFilters(binder->_filterNames);
-                for (auto ioloop : ioLoops)
-                {
-                    binder->_responsePtrMap[ioloop] = nullptr;
-                }
+                binder->filters_ =
+                    filters_function::createFilters(binder->filterNames_);
             }
         }
     }
@@ -305,19 +305,19 @@ void HttpSimpleControllersRouter::doPreHandlingAdvices(
         auto resp = HttpResponse::newHttpResponse();
         resp->setContentTypeCode(ContentType::CT_TEXT_PLAIN);
         std::string methods = "OPTIONS,";
-        if (routerItem._binders[Get] && routerItem._binders[Get]->_isCORS)
+        if (routerItem.binders_[Get] && routerItem.binders_[Get]->isCORS_)
         {
             methods.append("GET,HEAD,");
         }
-        if (routerItem._binders[Post] && routerItem._binders[Post]->_isCORS)
+        if (routerItem.binders_[Post] && routerItem.binders_[Post]->isCORS_)
         {
             methods.append("POST,");
         }
-        if (routerItem._binders[Put] && routerItem._binders[Put]->_isCORS)
+        if (routerItem.binders_[Put] && routerItem.binders_[Put]->isCORS_)
         {
             methods.append("PUT,");
         }
-        if (routerItem._binders[Delete] && routerItem._binders[Delete]->_isCORS)
+        if (routerItem.binders_[Delete] && routerItem.binders_[Delete]->isCORS_)
         {
             methods.append("DELETE,");
         }
@@ -339,19 +339,16 @@ void HttpSimpleControllersRouter::doPreHandlingAdvices(
         callback(resp);
         return;
     }
-    if (!_preHandlingObservers.empty())
+    if (!preHandlingObservers_.empty())
     {
-        for (auto &observer : _preHandlingObservers)
+        for (auto &observer : preHandlingObservers_)
         {
             observer(req);
         }
     }
-    if (_preHandlingAdvices.empty())
+    if (preHandlingAdvices_.empty())
     {
-        doControllerHandler(ctrlBinderPtr,
-                            routerItem,
-                            req,
-                            std::move(callback));
+        doControllerHandler(ctrlBinderPtr, req, std::move(callback));
     }
     else
     {
@@ -359,7 +356,7 @@ void HttpSimpleControllersRouter::doPreHandlingAdvices(
             std::make_shared<std::function<void(const HttpResponsePtr &)>>(
                 std::move(callback));
         doAdvicesChain(
-            _preHandlingAdvices,
+            preHandlingAdvices_,
             0,
             req,
             std::make_shared<std::function<void(const HttpResponsePtr &)>>(
@@ -368,9 +365,8 @@ void HttpSimpleControllersRouter::doPreHandlingAdvices(
                                                                   resp,
                                                                   *callbackPtr);
                 }),
-            [this, ctrlBinderPtr, &routerItem, req, callbackPtr]() {
+            [this, ctrlBinderPtr, req, callbackPtr]() {
                 doControllerHandler(ctrlBinderPtr,
-                                    routerItem,
                                     req,
                                     std::move(*callbackPtr));
             });
@@ -382,7 +378,7 @@ void HttpSimpleControllersRouter::invokeCallback(
     const HttpRequestImplPtr &req,
     const HttpResponsePtr &resp)
 {
-    for (auto &advice : _postHandlingAdvices)
+    for (auto &advice : postHandlingAdvices_)
     {
         advice(req, resp);
     }

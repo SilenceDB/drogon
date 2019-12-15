@@ -374,12 +374,33 @@ void ApiTest::get2(const HttpRequestPtr &req,
     callback(res);
 }
 
-void ApiTest::jsonTest(const HttpRequestPtr &req,
+void ApiTest::jsonTest(std::shared_ptr<Json::Value> &&json,
                        std::function<void(const HttpResponsePtr &)> &&callback)
 {
-    auto json = req->getJsonObject();
     Json::Value ret;
     if (json)
+    {
+        ret["result"] = "ok";
+    }
+    else
+    {
+        ret["result"] = "bad";
+    }
+    auto resp = HttpResponse::newCustomHttpResponse(ret);
+    callback(resp);
+}
+
+void ApiTest::formTest(const HttpRequestPtr &req,
+                       std::function<void(const HttpResponsePtr &)> &&callback)
+{
+    auto parameters = req->getParameters();
+    Json::Value ret;
+    ret["k1"] = parameters["k1"];
+    ret["k2"] = parameters["k2"];
+    ret["k3"] = parameters["k3"];
+
+    if (parameters["k1"] == "1" && parameters["k2"] == "安" &&
+        parameters["k3"] == "test@example.com")
     {
         ret["result"] = "ok";
     }
@@ -391,19 +412,34 @@ void ApiTest::jsonTest(const HttpRequestPtr &req,
     callback(resp);
 }
 
-void ApiTest::formTest(const HttpRequestPtr &req,
-                       std::function<void(const HttpResponsePtr &)> &&callback)
+void ApiTest::attributesTest(
+    const HttpRequestPtr &req,
+    std::function<void(const HttpResponsePtr &)> &&callback)
 {
-    auto parameters = req->getParameters();
+    AttributesPtr attributes = req->getAttributes();
+    const std::string key = "ATTR_ADDR";
     Json::Value ret;
-    if (parameters["k1"] == "1" && parameters["k2"] == "安")
+
+    uint64_t data = (uint64_t)req.get();
+
+    if (attributes->find(key))
     {
-        ret["result"] = "ok";
+        ret["result"] = "bad";
+        callback(HttpResponse::newHttpJsonResponse(ret));
+        return;
     }
-    else
+
+    attributes->insert(key, data);
+
+    if (!attributes->find(key) || attributes->get<uint64_t>(key) != data)
     {
         ret["result"] = "bad";
     }
-    auto resp = HttpResponse::newHttpJsonResponse(ret);
-    callback(resp);
+    else
+    {
+        ret["result"] = "ok";
+    }
+
+    callback(HttpResponse::newHttpJsonResponse(ret));
+    return;
 }

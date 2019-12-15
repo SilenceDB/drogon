@@ -21,6 +21,7 @@
 #include <drogon/orm/ArrayParser.h>
 #include <drogon/orm/Result.h>
 #include <drogon/orm/Row.h>
+#include <trantor/utils/Logger.h>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -85,7 +86,7 @@ namespace orm
 class Field
 {
   public:
-    using size_type = unsigned long;
+    using SizeType = unsigned long;
 
     /// Column name
     const char *name() const;
@@ -105,7 +106,7 @@ class Field
     /// Get the length of the plain C string
     size_t length() const
     {
-        return _result.getLength(_row, _column);
+        return result_.getLength(row_, column_);
     }
 
     /// Convert to a type T value
@@ -114,29 +115,36 @@ class Field
     {
         if (isNull())
             return T();
-        auto _data = _result.getValue(_row, _column);
-        // auto _dataLength = _result.getLength(_row, _column);
+        auto data_ = result_.getValue(row_, column_);
+        // auto dataLength_ = result_.getLength(row_, column_);
         // For binary format!
-        // if (_dataLength == 1)
+        // if (dataLength_ == 1)
         // {
-        //     return *_data;
+        //     return *data_;
         // }
-        // else if (_dataLength == 4)
+        // else if (dataLength_ == 4)
         // {
-        //     const int32_t *n = (int32_t *)_data;
+        //     const int32_t *n = (int32_t *)data_;
         //     return ntohl(*n);
         // }
-        // else if (_dataLength == 8)
+        // else if (dataLength_ == 8)
         // {
-        //     const int64_t *n = (int64_t *)_data;
+        //     const int64_t *n = (int64_t *)data_;
         //     return ntohll(*n);
         // }
         // return 0;
         T value = T();
-        if (_data)
+        if (data_)
         {
-            std::stringstream ss(_data);
-            ss >> value;
+            try
+            {
+                std::stringstream ss(data_);
+                ss >> value;
+            }
+            catch (...)
+            {
+                LOG_DEBUG << "Type error";
+            }
         }
         return value;
     }
@@ -151,7 +159,7 @@ class Field
      */
     ArrayParser getArrayParser() const
     {
-        return ArrayParser(_result.getValue(_row, _column));
+        return ArrayParser(result_.getValue(row_, column_));
     }
     template <typename T>
     std::vector<std::shared_ptr<T>> asArray() const
@@ -181,18 +189,18 @@ class Field
     }
 
   protected:
-    Result::size_type _row;
+    Result::SizeType row_;
     /**
      * Column number
      * You'd expect this to be a size_t, but due to the way reverse iterators
      * are related to regular iterators, it must be allowed to underflow to -1.
      */
-    long _column;
+    long column_;
     friend class Row;
-    Field(const Row &row, Row::size_type columnNum) noexcept;
+    Field(const Row &row, Row::SizeType columnNum) noexcept;
 
   private:
-    const Result _result;
+    const Result result_;
 };
 template <>
 std::string Field::as<std::string>() const;
@@ -205,22 +213,105 @@ std::vector<char> Field::as<std::vector<char>>() const;
 template <>
 inline drogon::string_view Field::as<drogon::string_view>() const
 {
-    auto first = _result.getValue(_row, _column);
-    auto length = _result.getLength(_row, _column);
+    auto first = result_.getValue(row_, column_);
+    auto length = result_.getLength(row_, column_);
     return drogon::string_view(first, length);
 }
+
 template <>
-int Field::as<int>() const;
+inline float Field::as<float>() const
+{
+    if (isNull())
+        return 0.0;
+    return atof(result_.getValue(row_, column_));
+}
+
 template <>
-long Field::as<long>() const;
+inline double Field::as<double>() const
+{
+    if (isNull())
+        return 0.0;
+    return std::stod(result_.getValue(row_, column_));
+}
+
 template <>
-long long Field::as<long long>() const;
+inline bool Field::as<bool>() const
+{
+    if (result_.getLength(row_, column_) != 1)
+    {
+        return false;
+    }
+    auto value = result_.getValue(row_, column_);
+    if (*value == 't' || *value == '1')
+        return true;
+    return false;
+}
+
 template <>
-float Field::as<float>() const;
+inline int Field::as<int>() const
+{
+    if (isNull())
+        return 0;
+    return std::stoi(result_.getValue(row_, column_));
+}
+
 template <>
-double Field::as<double>() const;
+inline long Field::as<long>() const
+{
+    if (isNull())
+        return 0;
+    return std::stol(result_.getValue(row_, column_));
+}
+
 template <>
-bool Field::as<bool>() const;
+inline int8_t Field::as<int8_t>() const
+{
+    if (isNull())
+        return 0;
+    return atoi(result_.getValue(row_, column_));
+}
+
+template <>
+inline long long Field::as<long long>() const
+{
+    if (isNull())
+        return 0;
+    return atoll(result_.getValue(row_, column_));
+}
+
+template <>
+inline unsigned int Field::as<unsigned int>() const
+{
+    if (isNull())
+        return 0;
+    return static_cast<unsigned int>(
+        std::stoi(result_.getValue(row_, column_)));
+}
+
+template <>
+inline unsigned long Field::as<unsigned long>() const
+{
+    if (isNull())
+        return 0;
+    return std::stoul(result_.getValue(row_, column_));
+}
+
+template <>
+inline uint8_t Field::as<uint8_t>() const
+{
+    if (isNull())
+        return 0;
+    return static_cast<uint8_t>(atoi(result_.getValue(row_, column_)));
+}
+
+template <>
+inline unsigned long long Field::as<unsigned long long>() const
+{
+    if (isNull())
+        return 0;
+    return std::stoull(result_.getValue(row_, column_));
+}
+
 // std::vector<int32_t> Field::as<std::vector<int32_t>>() const;
 // template <>
 // std::vector<int64_t> Field::as<std::vector<int64_t>>() const;

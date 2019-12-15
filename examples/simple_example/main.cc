@@ -119,7 +119,16 @@ class Test : public HttpController<Test>
 using namespace std::placeholders;
 using namespace drogon;
 
-/// Some examples in the main function some common functions of drogon. In
+namespace drogon
+{
+template <>
+string_view fromRequest(const HttpRequest &req)
+{
+    return req.body();
+}
+}  // namespace drogon
+
+/// Some examples in the main function show some common functions of drogon. In
 /// practice, we don't need such a lengthy main function.
 int main()
 {
@@ -134,16 +143,25 @@ int main()
             .addListener("0.0.0.0", 8849, true);
     }
     // Class function example
-    app().registerHandler("/api/v1/handle1/{1}/{2}/?p3={3}&p4={4}", &A::handle);
-    app().registerHandler("/api/v1/handle11/{1}/{2}/?p3={3}&p4={4}",
-                          &A::staticHandle);
+    app().registerHandler("/api/v1/handle1/{}/{}/?p3={}&p4={}", &A::handle);
+    app().registerHandler(
+        "/api/v1/handle11/{int p1}/{string p2}/?p3={string p3}&p4={int p4}",
+        &A::staticHandle);
     // Lambda example
     app().registerHandler(
-        "/api/v1/handle2/{1}/{2}",
+        "/api/v1/handle2/{int a}/{float b}",
         [](const HttpRequestPtr &req,
            std::function<void(const HttpResponsePtr &)> &&callback,
-           int a,
-           float b) {
+           int a,    // here the `a` parameter is converted from the number 1
+                     // parameter in the path.
+           float b,  // here the `b` parameter is converted from the number 2
+                     // parameter in the path.
+           string_view &&body,  // here the `body` parameter is converted from
+                                // req->as<string_view>();
+           const std::shared_ptr<Json::Value>
+               &jsonPtr  // here the `jsonPtr` parameter is converted from
+                         // req->as<std::shared_ptr<Json::Value>>();
+        ) {
             HttpViewData data;
             data.insert("title", std::string("ApiTest::get"));
             std::unordered_map<std::string, std::string> para;
@@ -152,6 +170,8 @@ int main()
             data.insert("parameters", para);
             auto res = HttpResponse::newHttpViewResponse("ListParaView", data);
             callback(res);
+            LOG_DEBUG << body.data();
+            assert(!jsonPtr);
         });
 
     // Functor example
@@ -167,7 +187,7 @@ int main()
                        const std::string &,
                        int)>
         func = std::bind(&A::handle, &tmp, _1, _2, _3, _4, _5, _6);
-    app().registerHandler("/api/v1/handle4/{4}/{3}/{1}", func);
+    app().registerHandler("/api/v1/handle4/{4:p4}/{3:p3}/{1:p1}", func);
 
     app().setDocumentRoot("./");
     app().enableSession(60);
@@ -278,6 +298,8 @@ int main()
         }
         std::cout << std::get<2>(info) << std::endl;
     }
-
+    auto resp = HttpResponse::newFileResponse("index.html");
+    resp->setExpiredTime(0);
+    app().setCustom404Page(resp);
     app().run();
 }

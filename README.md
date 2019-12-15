@@ -11,7 +11,7 @@
 
 Drogon's main application platform is Linux. It also supports Mac OS and FreeBSD. Currently, it does not support windows. Its main features are as follows:
 
-* Use a non-blocking I/O network lib based on epoll (kqueue under MacOS/FreeBSD) to provide high-concurrency, high-performance network IO, please visit the [benchmarks](https://github.com/an-tao/drogon/wiki/13-Benchmarks) page for more details;
+* Use a non-blocking I/O network lib based on epoll (kqueue under MacOS/FreeBSD) to provide high-concurrency, high-performance network IO, please visit the [benchmarks](https://github.com/an-tao/drogon/wiki/13-Benchmarks) page and [TFB Live Results](https://tfb-status.techempower.com/) for more details;
 * Provide a completely asynchronous programming mode;
 * Support Http1.0/1.1 (server side and client side);
 * Based on template, a simple reflection mechanism is implemented to completely decouple the main program framework, controllers and views.
@@ -68,7 +68,7 @@ int main()
 Drogon provides some interfaces for adding controller logic directly in the main() function, for example, user can register a handler like this in Drogon:
 
 ```c++
-app.registerHandler("/test?username={1}",
+app.registerHandler("/test?username={name}",
                     [](const HttpRequestPtr& req,
                        std::function<void (const HttpResponsePtr &)> &&callback,
                        const std::string &name)
@@ -158,9 +158,9 @@ class User : public drogon::HttpController<User>
   public:
     METHOD_LIST_BEGIN
     //use METHOD_ADD to add your custom processing function here;
-    METHOD_ADD(User::getInfo, "/{1}", Get);                  //path is /api/v1/User/{arg1}
-    METHOD_ADD(User::getDetailInfo, "/{1}/detailinfo", Get);  //path is /api/v1/User/{arg1}/detailinfo
-    METHOD_ADD(User::newUser, "/{1}", Post);                 //path is /api/v1/User/{arg1}
+    METHOD_ADD(User::getInfo, "/{id}", Get);                  //path is /api/v1/User/{arg1}
+    METHOD_ADD(User::getDetailInfo, "/{id}/detailinfo", Get);  //path is /api/v1/User/{arg1}/detailinfo
+    METHOD_ADD(User::newUser, "/{name}", Post);                 //path is /api/v1/User/{arg1}
     METHOD_LIST_END
     //your declaration of processing function maybe like this:
     void getInfo(const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, int userId) const;

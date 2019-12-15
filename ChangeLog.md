@@ -4,15 +4,116 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0-beta12] - 2019-11-30
+
+### Changed
+
+- Make dg_ctl a symlink
+
+- Modify some code styles
+
+- Explicitly set path to '/' for JSESSIONID cookie
+
+- Handle gzip errors safely
+
+- Add the SecureSSLRedirector plugin
+
+### Fixed
+
+- Fix a bug in dg_ctl for creating models of sqlite3
+
+- Reset the flag used to parse json to false before recycling HttpRequest objects
+
+## [1.0.0-beta11] - 2019-11-06
+
+### Changed
+
+- Delete useless log output
+
+## [1.0.0-beta10] - 2019-11-04
+
+### API change list
+
+- None
+
+### Changed
+
+- Add the headers configuration option for static files
+
+### Fixed
+
+- Fix(compilation on alpine): Replace u_short alias.
+
+
+## [1.0.0-beta9] - 2019-10-28
+
+### API change list
+
+- Add interfaces for accessing content of attachments.
+
+- Add option to disable setting the 404 status code of the custom 404 page.
+
+- Make user can use any string as a placeholder's name in routing patterns.
+
+- Add type conversion methods to the HttpRequest and HttpResponse classes.
+
+### Changed
+
+- Modify cmake configuration.
+
+- Modify the quit() method.
+
+- Implement relationships in ORM.
+
+### Fixed
+
+- Fix size_t underflow of drogon_ctl.
+
+- Fix some race conditions.
+
+- Fix a busy loop bug when connections to mysql server are timeout.
+
+
+## [1.0.0-beta8] - 2019-10-03
+
 ### API change list
 
 - Add length() method to the Field class.
 
 - Add `as<bool>()` function template specialization to the Field class.
 
+- Add add attribute store methods to the HttpRequest class.
+
+- Add the setCustomContentTypeString() method to the HttpRequest class.
+
+- Add thread storage.
+
+
 ### Changed
 
 - Use .find('x') instead of .find("x") in a string search.
+
+- Add the ability to create restful API controllers.
+
+### Fixed
+
+- Fix a bug of creating models for mysql.
+
+- Fix a bug when HTTP method is PUT.
+
+- Fix a bug when using 'is null' substatement in ORM.
+
+- Fix a sqlite3 bug when some SQL errors occur.
+
+- Fix bug with parsing json.
+
+- Fix url decode.
+
+- Fix a error in HttpClient.
+
+- Fix a error in setThreadNum method.
+
+- Fix some race conditions.
 
 ## [1.0.0-beta7] - 2019-08-31
 
@@ -147,7 +248,17 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.0-beta1] - 2019-06-11
 
-[Unreleased]: https://github.com/an-tao/drogon/compare/v1.0.0-beta7...HEAD
+[Unreleased]: https://github.com/an-tao/drogon/compare/v1.0.0-beta12...HEAD
+
+[1.0.0-beta12]: https://github.com/an-tao/drogon/compare/v1.0.0-beta11...v1.0.0-beta12
+
+[1.0.0-beta11]: https://github.com/an-tao/drogon/compare/v1.0.0-beta10...v1.0.0-beta11
+
+[1.0.0-beta10]: https://github.com/an-tao/drogon/compare/v1.0.0-beta9...v1.0.0-beta10
+
+[1.0.0-beta9]: https://github.com/an-tao/drogon/compare/v1.0.0-beta8...v1.0.0-beta9
+
+[1.0.0-beta8]: https://github.com/an-tao/drogon/compare/v1.0.0-beta7...v1.0.0-beta8
 
 [1.0.0-beta7]: https://github.com/an-tao/drogon/compare/v1.0.0-beta6...v1.0.0-beta7
 

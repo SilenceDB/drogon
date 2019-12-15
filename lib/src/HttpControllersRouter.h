@@ -17,6 +17,7 @@
 #include "impl_forwards.h"
 #include <drogon/drogon_callbacks.h>
 #include <drogon/HttpBinder.h>
+#include <drogon/IOThreadStorage.h>
 #include <trantor/utils/NonCopyable.h>
 #include <atomic>
 #include <memory>
@@ -49,12 +50,12 @@ class HttpControllersRouter : public trantor::NonCopyable
         const std::vector<std::function<void(const HttpRequestPtr &,
                                              const HttpResponsePtr &)>>
             &postHandlingAdvices)
-        : _fileRouter(router),
-          _postRoutingAdvices(postRoutingAdvices),
-          _preHandlingAdvices(preHandlingAdvices),
-          _postRoutingObservers(postRoutingObservers),
-          _preHandlingObservers(preHandlingObservers),
-          _postHandlingAdvices(postHandlingAdvices)
+        : fileRouter_(router),
+          postRoutingAdvices_(postRoutingAdvices),
+          preHandlingAdvices_(preHandlingAdvices),
+          postRoutingObservers_(postRoutingObservers),
+          preHandlingObservers_(preHandlingObservers),
+          postHandlingAdvices_(postHandlingAdvices)
     {
     }
     void init(const std::vector<trantor::EventLoop *> &ioLoops);
@@ -69,48 +70,46 @@ class HttpControllersRouter : public trantor::NonCopyable
     getHandlersInfo() const;
 
   private:
-    StaticFileRouter &_fileRouter;
+    StaticFileRouter &fileRouter_;
     struct CtrlBinder
     {
-        internal::HttpBinderBasePtr _binderPtr;
-        std::string _handlerName;
-        std::vector<std::string> _filterNames;
-        std::vector<std::shared_ptr<HttpFilterBase>> _filters;
-        std::vector<size_t> _parameterPlaces;
-        std::map<std::string, size_t> _queryParametersPlaces;
-        std::map<trantor::EventLoop *, std::shared_ptr<HttpResponse>>
-            _responsePtrMap;
-        bool _isCORS = false;
-        bool _hasCachedResponse = false;
+        internal::HttpBinderBasePtr binderPtr_;
+        std::string handlerName_;
+        std::vector<std::string> filterNames_;
+        std::vector<std::shared_ptr<HttpFilterBase>> filters_;
+        std::vector<size_t> parameterPlaces_;
+        std::map<std::string, size_t> queryParametersPlaces_;
+        IOThreadStorage<HttpResponsePtr> responseCache_;
+        bool isCORS_{false};
     };
-    typedef std::shared_ptr<CtrlBinder> CtrlBinderPtr;
+    using CtrlBinderPtr = std::shared_ptr<CtrlBinder>;
     struct HttpControllerRouterItem
     {
-        std::string _pathParameterPattern;
-        std::string _pathPattern;
-        std::regex _regex;
-        CtrlBinderPtr _binders[Invalid] = {
+        std::string pathParameterPattern_;
+        std::string pathPattern_;
+        std::regex regex_;
+        CtrlBinderPtr binders_[Invalid]{
             nullptr};  // The enum value of Invalid is the http methods number
     };
-    std::vector<HttpControllerRouterItem> _ctrlVector;
-    std::mutex _ctrlMutex;
-    std::regex _ctrlRegex;
+    std::vector<HttpControllerRouterItem> ctrlVector_;
+    std::mutex ctrlMutex_;
+    std::regex ctrlRegex_;
 
     const std::vector<std::function<void(const HttpRequestPtr &,
                                          AdviceCallback &&,
                                          AdviceChainCallback &&)>>
-        &_postRoutingAdvices;
+        &postRoutingAdvices_;
     const std::vector<std::function<void(const HttpRequestPtr &,
                                          AdviceCallback &&,
                                          AdviceChainCallback &&)>>
-        &_preHandlingAdvices;
+        &preHandlingAdvices_;
     const std::vector<std::function<void(const HttpRequestPtr &)>>
-        &_postRoutingObservers;
+        &postRoutingObservers_;
     const std::vector<std::function<void(const HttpRequestPtr &)>>
-        &_preHandlingObservers;
+        &preHandlingObservers_;
     const std::vector<
         std::function<void(const HttpRequestPtr &, const HttpResponsePtr &)>>
-        &_postHandlingAdvices;
+        &postHandlingAdvices_;
 
     void doPreHandlingAdvices(
         const CtrlBinderPtr &ctrlBinderPtr,

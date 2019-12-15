@@ -33,7 +33,7 @@ namespace drogon
 namespace orm
 {
 class Sqlite3Connection;
-typedef std::shared_ptr<Sqlite3Connection> Sqlite3ConnectionPtr;
+using Sqlite3ConnectionPtr = std::shared_ptr<Sqlite3Connection>;
 class Sqlite3Connection : public DbConnection,
                           public std::enable_shared_from_this<Sqlite3Connection>
 {
@@ -50,8 +50,7 @@ class Sqlite3Connection : public DbConnection,
                          ResultCallback &&rcb,
                          std::function<void(const std::exception_ptr &)>
                              &&exceptCallback) override;
-    virtual void batchSql(
-        std::deque<std::shared_ptr<SqlCmd>> &&sqlCommands) override
+    virtual void batchSql(std::deque<std::shared_ptr<SqlCmd>> &&) override
     {
         LOG_FATAL << "The mysql library does not support batch mode";
         exit(1);
@@ -59,7 +58,7 @@ class Sqlite3Connection : public DbConnection,
     virtual void disconnect() override;
 
   private:
-    static std::once_flag _once;
+    static std::once_flag once_;
     void execSqlInQueue(
         const std::string &sql,
         size_t paraNum,
@@ -74,10 +73,10 @@ class Sqlite3Connection : public DbConnection,
     int stmtStep(sqlite3_stmt *stmt,
                  const std::shared_ptr<Sqlite3ResultImpl> &resultPtr,
                  int columnNum);
-    trantor::EventLoopThread _loopThread;
-    std::shared_ptr<sqlite3> _conn;
-    std::shared_ptr<SharedMutex> _sharedMutexPtr;
-    std::unordered_map<std::string, std::shared_ptr<sqlite3_stmt>> _stmtMap;
+    trantor::EventLoopThread loopThread_;
+    std::shared_ptr<sqlite3> connectionPtr_;
+    std::shared_ptr<SharedMutex> sharedMutexPtr_;
+    std::unordered_map<std::string, std::shared_ptr<sqlite3_stmt>> stmtsMap_;
 };
 
 }  // namespace orm

@@ -12,6 +12,7 @@
 #include <drogon/orm/SqlBinder.h>
 #include <drogon/orm/Mapper.h>
 #include <trantor/utils/Date.h>
+#include <trantor/utils/Logger.h>
 #include <json/json.h>
 #include <string>
 #include <memory>
@@ -21,7 +22,14 @@
 #include <iostream>
 
 using namespace drogon::orm;
-
+namespace drogon
+{
+namespace orm
+{
+class DbClient;
+using DbClientPtr = std::shared_ptr<DbClient>;
+}  // namespace orm
+}  // namespace drogon
 namespace drogon_model
 {
 namespace sqlite3
@@ -48,10 +56,56 @@ class Groups
     const static std::string tableName;
     const static bool hasPrimaryKey;
     const static std::string primaryKeyName;
-    typedef uint64_t PrimaryKeyType;
+    using PrimaryKeyType = uint64_t;
     const PrimaryKeyType &getPrimaryKey() const;
-    explicit Groups(const Row &r) noexcept;
+
+    /**
+     * @brief constructor
+     * @param r One row of records in the SQL query result.
+     * @param indexOffset Set the offset to -1 to access all columns by column
+     * names, otherwise access all columns by offsets.
+     * @note If the SQL is not a style of 'select * from table_name ...' (select
+     * all columns by an asterisk), please set the offset to -1.
+     */
+    explicit Groups(const Row &r, const ssize_t indexOffset = 0) noexcept;
+
+    /**
+     * @brief constructor
+     * @param pJson The json object to construct a new instance.
+     */
+    explicit Groups(const Json::Value &pJson) noexcept(false);
+
+    /**
+     * @brief constructor
+     * @param pJson The json object to construct a new instance.
+     * @param pMasqueradingVector The aliases of table columns.
+     */
+    Groups(const Json::Value &pJson,
+           const std::vector<std::string> &pMasqueradingVector) noexcept(false);
+
     Groups() = default;
+
+    void updateByJson(const Json::Value &pJson) noexcept(false);
+    void updateByMasqueradedJson(
+        const Json::Value &pJson,
+        const std::vector<std::string> &pMasqueradingVector) noexcept(false);
+    static bool validateJsonForCreation(const Json::Value &pJson,
+                                        std::string &err);
+    static bool validateMasqueradedJsonForCreation(
+        const Json::Value &,
+        const std::vector<std::string> &pMasqueradingVector,
+        std::string &err);
+    static bool validateJsonForUpdate(const Json::Value &pJson,
+                                      std::string &err);
+    static bool validateMasqueradedJsonForUpdate(
+        const Json::Value &,
+        const std::vector<std::string> &pMasqueradingVector,
+        std::string &err);
+    static bool validJsonOfField(size_t index,
+                                 const std::string &fieldName,
+                                 const Json::Value &pJson,
+                                 std::string &err,
+                                 bool isForCreation);
 
     /**  For column group_id  */
     /// Get the value of the column group_id, returns the default value if the
@@ -71,6 +125,7 @@ class Groups
     /// Set the value of the column group_name
     void setGroupName(const std::string &pGroupName) noexcept;
     void setGroupName(std::string &&pGroupName) noexcept;
+    void setGroupNameToNull() noexcept;
 
     /**  For column creater_id  */
     /// Get the value of the column creater_id, returns the default value if the
@@ -81,6 +136,7 @@ class Groups
     const std::shared_ptr<uint64_t> &getCreaterId() const noexcept;
     /// Set the value of the column creater_id
     void setCreaterId(const uint64_t &pCreaterId) noexcept;
+    void setCreaterIdToNull() noexcept;
 
     /**  For column create_time  */
     /// Get the value of the column create_time, returns the default value if
@@ -92,6 +148,7 @@ class Groups
     /// Set the value of the column create_time
     void setCreateTime(const std::string &pCreateTime) noexcept;
     void setCreateTime(std::string &&pCreateTime) noexcept;
+    void setCreateTimeToNull() noexcept;
 
     /**  For column inviting  */
     /// Get the value of the column inviting, returns the default value if the
@@ -102,6 +159,7 @@ class Groups
     const std::shared_ptr<uint64_t> &getInviting() const noexcept;
     /// Set the value of the column inviting
     void setInviting(const uint64_t &pInviting) noexcept;
+    void setInvitingToNull() noexcept;
 
     /**  For column inviting_user_id  */
     /// Get the value of the column inviting_user_id, returns the default value
@@ -112,6 +170,7 @@ class Groups
     const std::shared_ptr<uint64_t> &getInvitingUserId() const noexcept;
     /// Set the value of the column inviting_user_id
     void setInvitingUserId(const uint64_t &pInvitingUserId) noexcept;
+    void setInvitingUserIdToNull() noexcept;
 
     /**  For column avatar_id  */
     /// Get the value of the column avatar_id, returns the default value if the
@@ -123,6 +182,7 @@ class Groups
     /// Set the value of the column avatar_id
     void setAvatarId(const std::string &pAvatarId) noexcept;
     void setAvatarId(std::string &&pAvatarId) noexcept;
+    void setAvatarIdToNull() noexcept;
 
     /**  For column uuu  */
     /// Get the value of the column uuu, returns the default value if the column
@@ -133,6 +193,7 @@ class Groups
     const std::shared_ptr<double> &getUuu() const noexcept;
     /// Set the value of the column uuu
     void setUuu(const double &pUuu) noexcept;
+    void setUuuToNull() noexcept;
 
     /**  For column text  */
     /// Get the value of the column text, returns the default value if the
@@ -144,6 +205,7 @@ class Groups
     /// Set the value of the column text
     void setText(const std::string &pText) noexcept;
     void setText(std::string &&pText) noexcept;
+    void setTextToNull() noexcept;
 
     /**  For column avatar  */
     /// Get the value of the column avatar, returns the default value if the
@@ -157,6 +219,7 @@ class Groups
     /// Set the value of the column avatar
     void setAvatar(const std::vector<char> &pAvatar) noexcept;
     void setAvatar(const std::string &pAvatar) noexcept;
+    void setAvatarToNull() noexcept;
 
     /**  For column is_default  */
     /// Get the value of the column is_default, returns the default value if the
@@ -167,6 +230,7 @@ class Groups
     const std::shared_ptr<bool> &getIsDefault() const noexcept;
     /// Set the value of the column is_default
     void setIsDefault(const bool &pIsDefault) noexcept;
+    void setIsDefaultToNull() noexcept;
 
     static size_t getColumnNumber() noexcept
     {
@@ -175,7 +239,9 @@ class Groups
     static const std::string &getColumnName(size_t index) noexcept(false);
 
     Json::Value toJson() const;
-
+    Json::Value toMasqueradedJson(
+        const std::vector<std::string> &pMasqueradingVector) const;
+    /// Relationship interfaces
   private:
     friend Mapper<Groups>;
     static const std::vector<std::string> &insertColumns() noexcept;
@@ -184,29 +250,159 @@ class Groups
     void updateArgs(drogon::orm::internal::SqlBinder &binder) const;
     /// For mysql or sqlite3
     void updateId(const uint64_t id);
-    std::shared_ptr<uint64_t> _groupId;
-    std::shared_ptr<std::string> _groupName;
-    std::shared_ptr<uint64_t> _createrId;
-    std::shared_ptr<std::string> _createTime;
-    std::shared_ptr<uint64_t> _inviting;
-    std::shared_ptr<uint64_t> _invitingUserId;
-    std::shared_ptr<std::string> _avatarId;
-    std::shared_ptr<double> _uuu;
-    std::shared_ptr<std::string> _text;
-    std::shared_ptr<std::vector<char>> _avatar;
-    std::shared_ptr<bool> _isDefault;
+    std::shared_ptr<uint64_t> groupId_;
+    std::shared_ptr<std::string> groupName_;
+    std::shared_ptr<uint64_t> createrId_;
+    std::shared_ptr<std::string> createTime_;
+    std::shared_ptr<uint64_t> inviting_;
+    std::shared_ptr<uint64_t> invitingUserId_;
+    std::shared_ptr<std::string> avatarId_;
+    std::shared_ptr<double> uuu_;
+    std::shared_ptr<std::string> text_;
+    std::shared_ptr<std::vector<char>> avatar_;
+    std::shared_ptr<bool> isDefault_;
     struct MetaData
     {
-        const std::string _colName;
-        const std::string _colType;
-        const std::string _colDatabaseType;
-        const ssize_t _colLength;
-        const bool _isAutoVal;
-        const bool _isPrimaryKey;
-        const bool _notNull;
+        const std::string colName_;
+        const std::string colType_;
+        const std::string colDatabaseType_;
+        const ssize_t colLength_;
+        const bool isAutoVal_;
+        const bool isPrimaryKey_;
+        const bool notNull_;
     };
-    static const std::vector<MetaData> _metaData;
-    bool _dirtyFlag[11] = {false};
+    static const std::vector<MetaData> metaData_;
+    bool dirtyFlag_[11] = {false};
+
+  public:
+    static const std::string &sqlForFindingByPrimaryKey()
+    {
+        static const std::string sql =
+            "select * from " + tableName + " where group_id = ?";
+        return sql;
+    }
+
+    static const std::string &sqlForDeletingByPrimaryKey()
+    {
+        static const std::string sql =
+            "delete from " + tableName + " where group_id = ?";
+        return sql;
+    }
+    std::string sqlForInserting(bool &needSelection) const
+    {
+        std::string sql = "insert into " + tableName + " (";
+        size_t parametersCount = 0;
+        needSelection = false;
+        sql += "group_id,";
+        ++parametersCount;
+        if (dirtyFlag_[1])
+        {
+            sql += "group_name,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[2])
+        {
+            sql += "creater_id,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[3])
+        {
+            sql += "create_time,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[4])
+        {
+            sql += "inviting,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[5])
+        {
+            sql += "inviting_user_id,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[6])
+        {
+            sql += "avatar_id,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[7])
+        {
+            sql += "uuu,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[8])
+        {
+            sql += "text,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[9])
+        {
+            sql += "avatar,";
+            ++parametersCount;
+        }
+        if (dirtyFlag_[10])
+        {
+            sql += "is_default,";
+            ++parametersCount;
+        }
+        needSelection = true;
+        if (parametersCount > 0)
+        {
+            sql[sql.length() - 1] = ')';
+            sql += " values (";
+        }
+        else
+            sql += ") values (";
+
+        sql += "default,";
+        if (dirtyFlag_[1])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[2])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[3])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[4])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[5])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[6])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[7])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[8])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[9])
+        {
+            sql.append("?,");
+        }
+        if (dirtyFlag_[10])
+        {
+            sql.append("?,");
+        }
+        if (parametersCount > 0)
+        {
+            sql.resize(sql.length() - 1);
+        }
+        sql.append(1, ')');
+        LOG_TRACE << sql;
+        return sql;
+    }
 };
 }  // namespace sqlite3
 }  // namespace drogon_model

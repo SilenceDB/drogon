@@ -26,16 +26,17 @@ namespace orm
 class ConstResultIterator
     : public std::iterator<std::random_access_iterator_tag,
                            const Row,
-                           Result::difference_type,
+                           Result::DifferenceType,
                            ConstResultIterator,
                            Row>,
       protected Row
 {
   public:
     using pointer = const Row *;
-    using reference = Row;
-    using size_type = Result::size_type;
-    using difference_type = Result::difference_type;
+    using reference = const Row &;
+    using value_type = const Row;
+    using size_type = Result::SizeType;
+    using difference_type = Result::DifferenceType;
     // ConstResultIterator(const Row &t) noexcept : Row(t) {}
 
     pointer operator->()
@@ -44,60 +45,60 @@ class ConstResultIterator
     }
     reference operator*()
     {
-        return Row(*this);
+        return *this;
     }
 
     ConstResultIterator operator++(int);
     ConstResultIterator &operator++()
     {
-        ++_index;
+        ++index_;
         return *this;
     }
     ConstResultIterator operator--(int);
     ConstResultIterator &operator--()
     {
-        --_index;
+        --index_;
         return *this;
     }
     ConstResultIterator &operator+=(difference_type i)
     {
-        _index += i;
+        index_ += i;
         return *this;
     }
     ConstResultIterator &operator-=(difference_type i)
     {
-        _index -= i;
+        index_ -= i;
         return *this;
     }
 
     bool operator==(const ConstResultIterator &other) const
     {
-        return _index == other._index;
+        return index_ == other.index_;
     }
     bool operator!=(const ConstResultIterator &other) const
     {
-        return _index != other._index;
+        return index_ != other.index_;
     }
     bool operator>(const ConstResultIterator &other) const
     {
-        return _index > other._index;
+        return index_ > other.index_;
     }
     bool operator<(const ConstResultIterator &other) const
     {
-        return _index < other._index;
+        return index_ < other.index_;
     }
     bool operator>=(const ConstResultIterator &other) const
     {
-        return _index >= other._index;
+        return index_ >= other.index_;
     }
     bool operator<=(const ConstResultIterator &other) const
     {
-        return _index <= other._index;
+        return index_ <= other.index_;
     }
 
   private:
     friend class Result;
-    ConstResultIterator(const Result &r, size_type index) noexcept
+    ConstResultIterator(const Result &r, SizeType index) noexcept
         : Row(r, index)
     {
     }
@@ -111,8 +112,8 @@ class ConstReverseResultIterator : private ConstResultIterator
     using iterator_type::difference_type;
     using iterator_type::iterator_category;
     using iterator_type::pointer;
-    using value_type = iterator_type::value_type;
-    using reference = iterator_type::reference;
+    using iterator_type::reference;
+    using iterator_type::value_type;
 
     ConstReverseResultIterator(const ConstReverseResultIterator &rhs)
         : ConstResultIterator(rhs)
@@ -154,27 +155,27 @@ class ConstReverseResultIterator : private ConstResultIterator
 
     bool operator==(const ConstReverseResultIterator &other) const
     {
-        return _index == other._index;
+        return index_ == other.index_;
     }
     bool operator!=(const ConstReverseResultIterator &other) const
     {
-        return _index != other._index;
+        return index_ != other.index_;
     }
     bool operator>(const ConstReverseResultIterator &other) const
     {
-        return _index < other._index;
+        return index_ < other.index_;
     }
     bool operator<(const ConstReverseResultIterator &other) const
     {
-        return _index > other._index;
+        return index_ > other.index_;
     }
     bool operator>=(const ConstReverseResultIterator &other) const
     {
-        return _index <= other._index;
+        return index_ <= other.index_;
     }
     bool operator<=(const ConstReverseResultIterator &other) const
     {
-        return _index >= other._index;
+        return index_ >= other.index_;
     }
 };
 

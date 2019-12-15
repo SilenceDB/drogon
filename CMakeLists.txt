@@ -2,14 +2,18 @@ cmake_minimum_required(VERSION 3.5)
 
 project(drogon CXX)
 
-add_library(${PROJECT_NAME} STATIC)
+option(BUILD_CTL "Build drogon_ctl" ON)
+option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_ORM "Build orm" ON)
+option(LIBPQ_BATCH_MODE "Use batch mode for libpq" ON)
+option(BUILD_DROGON_SHARED "Build drogon as a shared lib" OFF)
 
 set(DROGON_MAJOR_VERSION 1)
 set(DROGON_MINOR_VERSION 0)
 set(DROGON_PATCH_VERSION 0)
 set(DROGON_VERSION
     ${DROGON_MAJOR_VERSION}.${DROGON_MINOR_VERSION}.${DROGON_PATCH_VERSION})
-set(PRE_RELEASE_STRING "beta7")
+set(PRE_RELEASE_STRING "beta12")
 
 # Offer the user the choice of overriding the installation directories
 set(INSTALL_LIB_DIR lib CACHE PATH "Installation directory for libraries")
@@ -36,6 +40,17 @@ foreach(p
     set(${var} "${CMAKE_INSTALL_PREFIX}/${${var}}")
   endif()
 endforeach()
+
+if(BUILD_DROGON_SHARED)
+  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+  list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${INSTALL_LIB_DIR}" isSystemDir)
+  if("${isSystemDir}" STREQUAL "-1")
+     set(CMAKE_INSTALL_RPATH "${INSTALL_LIB_DIR}")
+  endif("${isSystemDir}" STREQUAL "-1")
+  add_library(${PROJECT_NAME} SHARED)
+else()
+  add_library(${PROJECT_NAME} STATIC)
+endif()
 
 include(CheckIncludeFileCXX)
 
@@ -80,7 +95,7 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules/)
 # jsoncpp
 find_package(Jsoncpp REQUIRED)
 target_include_directories(${PROJECT_NAME} PUBLIC ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} PRIVATE ${JSONCPP_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${JSONCPP_LIBRARIES})
 list(APPEND INCLUDE_DIRS_FOR_DYNAMIC_VIEW ${JSONCPP_INCLUDE_DIRS})
 message(STATUS "jsoncpp inc path:" ${JSONCPP_INCLUDE_DIRS})
 
@@ -106,6 +121,22 @@ endif()
 find_package(UUID REQUIRED)
 target_include_directories(${PROJECT_NAME} PRIVATE ${UUID_INCLUDE_DIR})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${UUID_LIBRARIES})
+
+try_compile(normal_uuid ${CMAKE_BINARY_DIR}/cmaketest
+                  ${PROJECT_SOURCE_DIR}/cmake/tests/normal_uuid_lib_test.cc
+                  LINK_LIBRARIES ${UUID_LIBRARIES}
+                  CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${UUID_INCLUDE_DIR}")
+try_compile(ossp_uuid ${CMAKE_BINARY_DIR}/cmaketest
+                  ${PROJECT_SOURCE_DIR}/cmake/tests/ossp_uuid_lib_test.cc
+                  LINK_LIBRARIES ${UUID_LIBRARIES}
+                  CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${UUID_INCLUDE_DIR}")
+if(normal_uuid)
+    add_definitions(-DUSE_OSSP_UUID=0)
+elseif(ossp_uuid)
+    add_definitions(-DUSE_OSSP_UUID=1)
+else()
+    message(FATAL_ERROR "uuid lib error")
+endif()
 
 find_package(ZLIB REQUIRED)
 target_include_directories(${PROJECT_NAME} PRIVATE ${ZLIB_INCLUDE_DIR})
@@ -137,6 +168,7 @@ set(DROGON_SOURCES
     lib/src/MultiPart.cc
     lib/src/NotFound.cc
     lib/src/PluginsManager.cc
+    lib/src/SecureSSLRedirector.cc
     lib/src/SessionManager.cc
     lib/src/SharedLibManager.cc
     lib/src/StaticFileRouter.cc
@@ -152,14 +184,6 @@ if(OpenSSL_FOUND)
 else()
   set(DROGON_SOURCES ${DROGON_SOURCES} lib/src/ssl_funcs/Md5.cc
                      lib/src/ssl_funcs/Sha1.cc)
-endif()
-
-if(NOT BUILD_ORM)
-  set(BUILD_ORM TRUE CACHE BOOL INTERNAL)
-endif()
-
-if(NOT LIBPQ_BATCH_MODE)
-  set(LIBPQ_BATCH_MODE TRUE CACHE BOOL INTERNAL)
 endif()
 
 if(BUILD_ORM)
@@ -237,16 +261,8 @@ add_custom_command(TARGET makeVersion
                    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
                    VERBATIM)
 
-if(NOT BUILD_EXAMPLES)
-  set(BUILD_EXAMPLES TRUE CACHE BOOL INTERNAL)
-endif()
-
 if(BUILD_EXAMPLES)
   add_subdirectory(examples)
-endif()
-
-if(NOT BUILD_CTL)
-  set(BUILD_CTL TRUE CACHE BOOL INTERNAL)
 endif()
 
 if(BUILD_CTL)
@@ -267,18 +283,21 @@ if(PostgreSQL_FOUND OR MYSQL_FOUND OR SQLITE3_FOUND)
       orm_lib/src/Result.cc
       orm_lib/src/Row.cc
       orm_lib/src/SqlBinder.cc
-      orm_lib/src/TransactionImpl.cc)
+      orm_lib/src/TransactionImpl.cc
+      orm_lib/src/RestfulController.cc)
 else()
   set(DROGON_SOURCES ${DROGON_SOURCES} lib/src/DbClientManagerSkipped.cc)
 endif()
 
 target_sources(${PROJECT_NAME} PRIVATE ${DROGON_SOURCES})
 
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD ${DROGON_CXX_STANDARD})
+set_target_properties(${PROJECT_NAME}
+                      PROPERTIES CXX_STANDARD ${DROGON_CXX_STANDARD})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD_REQUIRED ON)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_EXTENSIONS OFF)
+set_target_properties(${PROJECT_NAME} PROPERTIES EXPORT_NAME Drogon)
 
-add_dependencies(drogon makeVersion)
+add_dependencies(${PROJECT_NAME} makeVersion)
 
 if(PostgreSQL_FOUND OR MYSQL_FOUND OR SQLITE3_FOUND)
   if(PostgreSQL_FOUND)
@@ -328,7 +347,7 @@ set(INCLUDING_DIRS ${INS_STRING})
 configure_file(${PROJECT_SOURCE_DIR}/cmake/templates/config.h.in
                ${PROJECT_BINARY_DIR}/drogon/config.h @ONLY)
 
-if(MAKETEST STREQUAL YES)
+if(BUILD_TESTING)
   add_subdirectory(lib/tests)
   if(PostgreSQL_FOUND)
     add_subdirectory(${PROJECT_SOURCE_DIR}/orm_lib/src/postgresql_impl/test)
@@ -340,15 +359,20 @@ if(MAKETEST STREQUAL YES)
   if(SQLITE3_FOUND)
     add_subdirectory(${PROJECT_SOURCE_DIR}/orm_lib/src/sqlite3_impl/test)
   endif()
+  enable_testing()
+  add_subdirectory(third_party/googletest)
+  add_subdirectory(unittest)
 endif()
 
 # Installation
 
-install(TARGETS drogon
+install(TARGETS ${PROJECT_NAME}
         EXPORT DrogonTargets
-        ARCHIVE DESTINATION "${INSTALL_LIB_DIR}" COMPONENT lib)
+        ARCHIVE DESTINATION "${INSTALL_LIB_DIR}" COMPONENT lib
+        LIBRARY DESTINATION "${INSTALL_LIB_DIR}" COMPONENT lib)
 
 set(DROGON_HEADERS
+    lib/inc/drogon/Attribute.h
     lib/inc/drogon/CacheMap.h
     lib/inc/drogon/Cookie.h
     lib/inc/drogon/DrClassMap.h
@@ -366,6 +390,7 @@ set(DROGON_HEADERS
     lib/inc/drogon/HttpTypes.h
     lib/inc/drogon/HttpViewData.h
     lib/inc/drogon/IntranetIpFilter.h
+    lib/inc/drogon/IOThreadStorage.h
     lib/inc/drogon/LocalHostFilter.h
     lib/inc/drogon/MultiPart.h
     lib/inc/drogon/NotFound.h
@@ -391,7 +416,8 @@ set(ORM_HEADERS
     orm_lib/inc/drogon/orm/ResultIterator.h
     orm_lib/inc/drogon/orm/Row.h
     orm_lib/inc/drogon/orm/RowIterator.h
-    orm_lib/inc/drogon/orm/SqlBinder.h)
+    orm_lib/inc/drogon/orm/SqlBinder.h
+    orm_lib/inc/drogon/orm/RestfulController.h)
 install(FILES ${ORM_HEADERS} DESTINATION ${INSTALL_INCLUDE_DIR}/drogon/orm)
 
 set(DROGON_UTIL_HEADERS
@@ -403,7 +429,8 @@ set(DROGON_UTIL_HEADERS
 install(FILES ${DROGON_UTIL_HEADERS}
         DESTINATION ${INSTALL_INCLUDE_DIR}/drogon/utils)
 
-set(DROGON_PLUGIN_HEADERS lib/inc/drogon/plugins/Plugin.h)
+set(DROGON_PLUGIN_HEADERS lib/inc/drogon/plugins/Plugin.h
+                          lib/inc/drogon/plugins/SecureSSLRedirector.h)
 install(FILES ${DROGON_PLUGIN_HEADERS}
         DESTINATION ${INSTALL_INCLUDE_DIR}/drogon/plugins)
 
@@ -441,4 +468,5 @@ install(
 # Install the export set for use with the install-tree
 install(EXPORT DrogonTargets
         DESTINATION "${INSTALL_DROGON_CMAKE_DIR}"
+        NAMESPACE Drogon::
         COMPONENT dev)

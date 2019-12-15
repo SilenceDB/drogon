@@ -52,24 +52,26 @@ class DbClientLockFree : public DbClient,
             &callback) override;
 
   private:
-    std::string _connInfo;
-    trantor::EventLoop *_loop;
+    std::string connectionInfo_;
+    trantor::EventLoop *loop_;
     DbConnectionPtr newConnection();
-    const size_t _connectionNum;
-    std::vector<DbConnectionPtr> _connections;
-    std::vector<DbConnectionPtr> _connectionHolders;
-    std::unordered_set<DbConnectionPtr> _transSet;
-    std::deque<std::shared_ptr<SqlCmd>> _sqlCmdBuffer;
+    const size_t connectionsNumber_;
+    std::vector<DbConnectionPtr> connections_;
+    std::vector<DbConnectionPtr> connectionHolders_;
+    std::unordered_set<DbConnectionPtr> transSet_;
+    std::deque<std::shared_ptr<SqlCmd>> sqlCmdBuffer_;
 
     std::queue<std::function<void(const std::shared_ptr<Transaction> &)>>
-        _transCallbacks;
+        transCallbacks_;
 
     void makeTrans(
         const DbConnectionPtr &conn,
         std::function<void(const std::shared_ptr<Transaction> &)> &&callback);
 
     void handleNewTask(const DbConnectionPtr &conn);
-    size_t _connectionPos = 0;  // Used for pg batch mode.
+#if LIBPQ_SUPPORTS_BATCH_MODE
+    size_t connectionPos_{0};  // Used for pg batch mode.
+#endif
 };
 
 }  // namespace orm

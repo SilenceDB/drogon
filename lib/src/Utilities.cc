@@ -69,7 +69,7 @@ std::string genRandomString(int length)
     std::string str;
     str.resize(length);
 
-    for (i = 0; i < length; i++)
+    for (i = 0; i < length; ++i)
     {
         int x = std::rand();
         while (x >= randMax)
@@ -87,7 +87,7 @@ std::vector<char> hexToBinaryVector(const char *ptr, size_t length)
 {
     assert(length % 2 == 0);
     std::vector<char> ret(length / 2, '\0');
-    for (size_t i = 0; i < ret.size(); i++)
+    for (size_t i = 0; i < ret.size(); ++i)
     {
         auto p = i * 2;
         char c1 = ptr[p];
@@ -136,7 +136,7 @@ std::string hexToBinaryString(const char *ptr, size_t length)
 {
     assert(length % 2 == 0);
     std::string ret(length / 2, '\0');
-    for (size_t i = 0; i < ret.length(); i++)
+    for (size_t i = 0; i < ret.length(); ++i)
     {
         auto p = i * 2;
         char c1 = ptr[p];
@@ -184,7 +184,7 @@ std::string hexToBinaryString(const char *ptr, size_t length)
 std::string binaryStringToHex(const unsigned char *ptr, size_t length)
 {
     std::string idString;
-    for (size_t i = 0; i < length; i++)
+    for (size_t i = 0; i < length; ++i)
     {
         int value = (ptr[i] & 0xf0) >> 4;
         if (value < 10)
@@ -232,11 +232,50 @@ std::vector<std::string> splitString(const std::string &str,
         ret.push_back(str.substr(pos2));
     return ret;
 }
+
+std::set<std::string> splitStringToSet(const std::string &str,
+                                       const std::string &separator)
+{
+    std::set<std::string> ret;
+    std::string::size_type pos1, pos2;
+    pos2 = 0;
+    pos1 = str.find(separator);
+    while (pos1 != std::string::npos)
+    {
+        if (pos1 != 0)
+        {
+            std::string item = str.substr(pos2, pos1 - pos2);
+            ret.insert(item);
+        }
+        pos2 = pos1 + separator.length();
+        while (pos2 < str.length() &&
+               str.substr(pos2, separator.length()) == separator)
+            pos2 += separator.length();
+        pos1 = str.find(separator, pos2);
+    }
+    if (pos2 < str.length())
+        ret.insert(str.substr(pos2));
+    return ret;
+}
+
 std::string getUuid()
 {
+#if USE_OSSP_UUID
+    uuid_t *uuid;
+    uuid_create(&uuid);
+    uuid_make(uuid, UUID_MAKE_V4);
+    char *str{nullptr};
+    size_t len{0};
+    uuid_export(uuid, UUID_FMT_BIN, &str, &len);
+    uuid_destroy(uuid);
+    std::string ret{binaryStringToHex((const unsigned char *)str, len)};
+    free(str);
+    return ret;
+#else
     uuid_t uu;
     uuid_generate(uu);
     return binaryStringToHex(uu, 16);
+#endif
 }
 
 std::string base64Encode(const unsigned char *bytes_to_encode,
@@ -259,7 +298,7 @@ std::string base64Encode(const unsigned char *bytes_to_encode,
                               ((char_array_3[2] & 0xc0) >> 6);
             char_array_4[3] = char_array_3[2] & 0x3f;
 
-            for (i = 0; (i < 4); i++)
+            for (i = 0; (i < 4); ++i)
                 ret += base64Chars[char_array_4[i]];
             i = 0;
         }
@@ -267,7 +306,7 @@ std::string base64Encode(const unsigned char *bytes_to_encode,
 
     if (i)
     {
-        for (int j = i; j < 3; j++)
+        for (int j = i; j < 3; ++j)
             char_array_3[j] = '\0';
 
         char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
@@ -277,7 +316,7 @@ std::string base64Encode(const unsigned char *bytes_to_encode,
             ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
         char_array_4[3] = char_array_3[2] & 0x3f;
 
-        for (int j = 0; (j < i + 1); j++)
+        for (int j = 0; (j < i + 1); ++j)
             ret += base64Chars[char_array_4[j]];
 
         while ((i++ < 3))
@@ -287,22 +326,23 @@ std::string base64Encode(const unsigned char *bytes_to_encode,
     return ret;
 }
 
-std::string base64Decode(std::string const &encoded_string)
+std::vector<char> base64DecodeToVector(const std::string &encoded_string)
 {
     int in_len = encoded_string.size();
     int i = 0;
-    int in_ = 0;
-    unsigned char char_array_4[4], char_array_3[3];
-    std::string ret;
+    int in_{0};
+    char char_array_4[4], char_array_3[3];
+    std::vector<char> ret;
+    ret.reserve(in_len);
 
     while (in_len-- && (encoded_string[in_] != '=') &&
            isBase64(encoded_string[in_]))
     {
         char_array_4[i++] = encoded_string[in_];
-        in_++;
+        ++in_;
         if (i == 4)
         {
-            for (i = 0; i < 4; i++)
+            for (i = 0; i < 4; ++i)
                 char_array_4[i] = base64Chars.find(char_array_4[i]);
 
             char_array_3[0] =
@@ -311,18 +351,18 @@ std::string base64Decode(std::string const &encoded_string)
                               ((char_array_4[2] & 0x3c) >> 2);
             char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
 
-            for (i = 0; (i < 3); i++)
-                ret += char_array_3[i];
+            for (i = 0; (i < 3); ++i)
+                ret.push_back(char_array_3[i]);
             i = 0;
         }
     }
 
     if (i)
     {
-        for (int j = i; j < 4; j++)
+        for (int j = i; j < 4; ++j)
             char_array_4[j] = 0;
 
-        for (int j = 0; j < 4; j++)
+        for (int j = 0; j < 4; ++j)
             char_array_4[j] = base64Chars.find(char_array_4[j]);
 
         char_array_3[0] =
@@ -331,7 +371,58 @@ std::string base64Decode(std::string const &encoded_string)
             ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
         char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
 
-        for (int j = 0; (j < i - 1); j++)
+        for (int j = 0; (j < i - 1); ++j)
+            ret.push_back(char_array_3[j]);
+    }
+
+    return ret;
+}
+
+std::string base64Decode(const std::string &encoded_string)
+{
+    int in_len = encoded_string.size();
+    int i = 0;
+    int in_{0};
+    unsigned char char_array_4[4], char_array_3[3];
+    std::string ret;
+
+    while (in_len-- && (encoded_string[in_] != '=') &&
+           isBase64(encoded_string[in_]))
+    {
+        char_array_4[i++] = encoded_string[in_];
+        ++in_;
+        if (i == 4)
+        {
+            for (i = 0; i < 4; ++i)
+                char_array_4[i] = base64Chars.find(char_array_4[i]);
+
+            char_array_3[0] =
+                (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+            char_array_3[1] = ((char_array_4[1] & 0xf) << 4) +
+                              ((char_array_4[2] & 0x3c) >> 2);
+            char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+            for (i = 0; (i < 3); ++i)
+                ret += char_array_3[i];
+            i = 0;
+        }
+    }
+
+    if (i)
+    {
+        for (int j = i; j < 4; ++j)
+            char_array_4[j] = 0;
+
+        for (int j = 0; j < 4; ++j)
+            char_array_4[j] = base64Chars.find(char_array_4[j]);
+
+        char_array_3[0] =
+            (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+        char_array_3[1] =
+            ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+        char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+        for (int j = 0; (j < i - 1); ++j)
             ret += char_array_3[j];
     }
 
@@ -352,7 +443,102 @@ static std::string charToHex(char c)
 
     return result;
 }
+std::string urlEncodeComponent(const std::string &src)
+{
+    std::string result;
+    std::string::const_iterator iter;
 
+    for (iter = src.begin(); iter != src.end(); ++iter)
+    {
+        switch (*iter)
+        {
+            case ' ':
+                result.append(1, '+');
+                break;
+            // alnum
+            case 'A':
+            case 'B':
+            case 'C':
+            case 'D':
+            case 'E':
+            case 'F':
+            case 'G':
+            case 'H':
+            case 'I':
+            case 'J':
+            case 'K':
+            case 'L':
+            case 'M':
+            case 'N':
+            case 'O':
+            case 'P':
+            case 'Q':
+            case 'R':
+            case 'S':
+            case 'T':
+            case 'U':
+            case 'V':
+            case 'W':
+            case 'X':
+            case 'Y':
+            case 'Z':
+            case 'a':
+            case 'b':
+            case 'c':
+            case 'd':
+            case 'e':
+            case 'f':
+            case 'g':
+            case 'h':
+            case 'i':
+            case 'j':
+            case 'k':
+            case 'l':
+            case 'm':
+            case 'n':
+            case 'o':
+            case 'p':
+            case 'q':
+            case 'r':
+            case 's':
+            case 't':
+            case 'u':
+            case 'v':
+            case 'w':
+            case 'x':
+            case 'y':
+            case 'z':
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+            // mark
+            case '-':
+            case '_':
+            case '.':
+            case '!':
+            case '~':
+            case '*':
+            case '(':
+            case ')':
+                result.append(1, *iter);
+                break;
+            // escape
+            default:
+                result.append(1, '%');
+                result.append(charToHex(*iter));
+                break;
+        }
+    }
+
+    return result;
+}
 std::string urlEncode(const std::string &src)
 {
     std::string result;
@@ -505,22 +691,9 @@ std::string urlDecode(const char *begin, const char *end)
                         x2 = x2 - 'A' + 10;
                     }
                     hex = x1 * 16 + x2;
-                    if (!((hex >= 48 && hex <= 57) ||   // 0-9
-                          (hex >= 97 && hex <= 122) ||  // a-z
-                          (hex >= 65 && hex <= 90) ||   // A-Z
-                          //[$-_.+!*'(),]  [$&+,/:;?@]
-                          hex == 0x21 || hex == 0x24 || hex == 0x26 ||
-                          hex == 0x27 || hex == 0x28 || hex == 0x29 ||
-                          hex == 0x2a || hex == 0x2b || hex == 0x2c ||
-                          hex == 0x2d || hex == 0x2e || hex == 0x2f ||
-                          hex == 0x3A || hex == 0x3B || hex == 0x3f ||
-                          hex == 0x40 || hex == 0x5f))
-                    {
-                        result += char(hex);
-                        i += 2;
-                    }
-                    else
-                        result += '%';
+
+                    result += char(hex);
+                    i += 2;
                 }
                 else
                 {
@@ -547,18 +720,36 @@ std::string gzipCompress(const char *data, const size_t ndata)
                          MAX_WBITS + 16,
                          8,
                          Z_DEFAULT_STRATEGY) != Z_OK)
-            return nullptr;
+        {
+            LOG_ERROR << "deflateInit2 error!";
+            return std::string{};
+        }
         std::string outstr;
         outstr.resize(compressBound(ndata));
         strm.next_in = (Bytef *)data;
         strm.avail_in = ndata;
-        strm.next_out = (Bytef *)outstr.data();
-        strm.avail_out = outstr.length();
-        if (deflate(&strm, Z_FINISH) != Z_STREAM_END)
-            return nullptr;
-        if (deflateEnd(&strm) != Z_OK)
-            return nullptr;
+        int ret;
+        do
+        {
+            if (strm.total_out >= outstr.size())
+            {
+                outstr.resize(strm.total_out * 2);
+            }
+            assert(outstr.size() >= strm.total_out);
+            strm.avail_out = outstr.size() - strm.total_out;
+            strm.next_out = (Bytef *)outstr.data() + strm.total_out;
+            ret = deflate(&strm, Z_FINISH); /* no bad return value */
+            if (ret == Z_STREAM_ERROR)
+            {
+                (void)deflateEnd(&strm);
+                return std::string{};
+            }
+        } while (strm.avail_out == 0);
+        assert(strm.avail_in == 0);
+        assert(ret == Z_STREAM_END); /* stream will be complete */
         outstr.resize(strm.total_out);
+        /* clean up and return */
+        (void)deflateEnd(&strm);
         return outstr;
     }
     return std::string{};
@@ -581,7 +772,10 @@ std::string gzipDecompress(const char *data, const size_t ndata)
     strm.zalloc = Z_NULL;
     strm.zfree = Z_NULL;
     if (inflateInit2(&strm, (15 + 32)) != Z_OK)
-        return nullptr;
+    {
+        LOG_ERROR << "inflateInit2 error!";
+        return std::string{};
+    }
     while (!done)
     {
         // Make sure we have enough room and reset the lengths.
@@ -618,8 +812,8 @@ std::string gzipDecompress(const char *data, const size_t ndata)
 
 char *getHttpFullDate(const trantor::Date &date)
 {
-    static __thread int64_t lastSecond = 0;
-    static __thread char lastTimeString[128] = {0};
+    static thread_local int64_t lastSecond = 0;
+    static thread_local char lastTimeString[128] = {0};
     auto nowSecond = date.microSecondsSinceEpoch() / MICRO_SECONDS_PRE_SEC;
     if (nowSecond == lastSecond)
     {

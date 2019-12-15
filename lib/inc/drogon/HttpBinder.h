@@ -20,6 +20,7 @@
 #include <drogon/DrClassMap.h>
 #include <drogon/DrObject.h>
 #include <drogon/utils/FunctionTraits.h>
+#include <drogon/HttpRequest.h>
 #include <list>
 #include <memory>
 #include <sstream>
@@ -87,12 +88,12 @@ T &getControllerObj()
     return obj;
 }
 
-typedef std::shared_ptr<HttpBinderBase> HttpBinderBasePtr;
+using HttpBinderBasePtr = std::shared_ptr<HttpBinderBase>;
 template <typename FUNCTION>
 class HttpBinder : public HttpBinderBase
 {
   public:
-    typedef FUNCTION FunctionType;
+    using FunctionType = FUNCTION;
     virtual void handleHttpRequest(
         std::list<std::string> &pathArguments,
         const HttpRequestPtr &req,
@@ -104,11 +105,11 @@ class HttpBinder : public HttpBinderBase
     {
         return traits::arity;
     }
-    HttpBinder(FUNCTION &&func) : _func(std::forward<FUNCTION>(func))
+    HttpBinder(FUNCTION &&func) : func_(std::forward<FUNCTION>(func))
     {
         static_assert(traits::isHTTPFunction,
                       "Your API handler function interface is wrong!");
-        _handlerName = DrClassMap::demangle(typeid(FUNCTION).name());
+        handlerName_ = DrClassMap::demangle(typeid(FUNCTION).name());
     }
     void test()
     {
@@ -117,26 +118,54 @@ class HttpBinder : public HttpBinderBase
     }
     virtual const std::string &handlerName() const override
     {
-        return _handlerName;
+        return handlerName_;
     }
 
   private:
-    FUNCTION _func;
+    FUNCTION func_;
 
-    typedef FunctionTraits<FUNCTION> traits;
+    using traits = FunctionTraits<FUNCTION>;
     template <std::size_t Index>
     using nth_argument_type = typename traits::template argument<Index>;
 
     static const size_t argument_count = traits::arity;
-    std::string _handlerName;
+    std::string handlerName_;
+
     template <typename T>
-    void getHandlerArgumentValue(T &value, std::string &&p)
+    struct CanConvertFromStringStream
+    {
+      private:
+        using yes = std::true_type;
+        using no = std::false_type;
+
+        template <typename U>
+        static auto test(U *p, std::stringstream &&ss)
+            -> decltype((ss >> *p), yes());
+
+        template <typename>
+        static no test(...);
+
+      public:
+        static constexpr bool value =
+            std::is_same<decltype(test<T>(nullptr, std::stringstream())),
+                         yes>::value;
+    };
+
+    template <typename T>
+    typename std::enable_if<CanConvertFromStringStream<T>::value, void>::type
+    getHandlerArgumentValue(T &value, std::string &&p)
     {
         if (!p.empty())
         {
             std::stringstream ss(std::move(p));
             ss >> value;
         }
+    }
+
+    template <typename T>
+    typename std::enable_if<!(CanConvertFromStringStream<T>::value), void>::type
+    getHandlerArgumentValue(T &value, std::string &&p)
+    {
     }
 
     void getHandlerArgumentValue(std::string &value, std::string &&p)
@@ -197,8 +226,9 @@ class HttpBinder : public HttpBinderBase
             BinderArgTypeTraits<nth_argument_type<sizeof...(Values)>>::isValid,
             "your handler argument type must be value type or const left "
             "reference type or right reference type");
-        typedef typename std::remove_cv<typename std::remove_reference<
-            nth_argument_type<sizeof...(Values)>>::type>::type ValueType;
+        using ValueType =
+            typename std::remove_cv<typename std::remove_reference<
+                nth_argument_type<sizeof...(Values)>>::type>::type;
         ValueType value = ValueType();
         if (!pathArguments.empty())
         {
@@ -214,6 +244,18 @@ class HttpBinder : public HttpBinderBase
                           << sizeof...(Values) + 1 << "th argument";
             }
         }
+        else
+        {
+            try
+            {
+                value = req->as<ValueType>();
+            }
+            catch (const std::exception &)
+            {
+                LOG_ERROR << "Error converting HttpRequest to the "
+                          << sizeof...(Values) + 1 << "th argument";
+            }
+        }
 
         run(pathArguments,
             req,
@@ -223,7 +265,7 @@ class HttpBinder : public HttpBinderBase
     }
     template <typename... Values, std::size_t Boundary = argument_count>
     typename std::enable_if<(sizeof...(Values) == Boundary), void>::type run(
-        std::list<std::string> &pathArguments,
+        std::list<std::string> &,
         const HttpRequestPtr &req,
         std::function<void(const HttpResponsePtr &)> &&callback,
         Values &&... values)
@@ -232,35 +274,84 @@ class HttpBinder : public HttpBinderBase
     }
     template <typename... Values,
               bool isClassFunction = traits::isClassFunction,
-              bool isDrObjectClass = traits::isDrObjectClass>
-    typename std::enable_if<isClassFunction && !isDrObjectClass, void>::type
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && !isDrObjectClass && isNormal,
+                            void>::type
     callFunction(const HttpRequestPtr &req,
                  std::function<void(const HttpResponsePtr &)> &&callback,
                  Values &&... values)
     {
         static auto &obj = getControllerObj<typename traits::class_type>();
-        (obj.*_func)(req, std::move(callback), std::move(values)...);
+        (obj.*func_)(req, std::move(callback), std::move(values)...);
     }
     template <typename... Values,
               bool isClassFunction = traits::isClassFunction,
-              bool isDrObjectClass = traits::isDrObjectClass>
-    typename std::enable_if<isClassFunction && isDrObjectClass, void>::type
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && isDrObjectClass && isNormal,
+                            void>::type
     callFunction(const HttpRequestPtr &req,
                  std::function<void(const HttpResponsePtr &)> &&callback,
                  Values &&... values)
     {
         static auto objPtr =
             DrClassMap::getSingleInstance<typename traits::class_type>();
-        (*objPtr.*_func)(req, std::move(callback), std::move(values)...);
+        (*objPtr.*func_)(req, std::move(callback), std::move(values)...);
     }
     template <typename... Values,
-              bool isClassFunction = traits::isClassFunction>
-    typename std::enable_if<!isClassFunction, void>::type callFunction(
-        const HttpRequestPtr &req,
-        std::function<void(const HttpResponsePtr &)> &&callback,
-        Values &&... values)
+              bool isClassFunction = traits::isClassFunction,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<!isClassFunction && isNormal, void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
     {
-        _func(req, std::move(callback), std::move(values)...);
+        func_(req, std::move(callback), std::move(values)...);
+    }
+
+    template <typename... Values,
+              bool isClassFunction = traits::isClassFunction,
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && !isDrObjectClass && !isNormal,
+                            void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
+    {
+        static auto &obj = getControllerObj<typename traits::class_type>();
+        (obj.*func_)((*req), std::move(callback), std::move(values)...);
+    }
+    template <typename... Values,
+              bool isClassFunction = traits::isClassFunction,
+              bool isDrObjectClass = traits::isDrObjectClass,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<isClassFunction && isDrObjectClass && !isNormal,
+                            void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
+    {
+        static auto objPtr =
+            DrClassMap::getSingleInstance<typename traits::class_type>();
+        (*objPtr.*func_)((*req), std::move(callback), std::move(values)...);
+    }
+    template <typename... Values,
+              bool isClassFunction = traits::isClassFunction,
+              bool isNormal = std::is_same<typename traits::first_param_type,
+                                           HttpRequestPtr>::value>
+    typename std::enable_if<!isClassFunction && !isNormal, void>::type
+    callFunction(const HttpRequestPtr &req,
+                 std::function<void(const HttpResponsePtr &)> &&callback,
+                 Values &&... values)
+    {
+        func_((*req), std::move(callback), std::move(values)...);
     }
 };
 

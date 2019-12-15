@@ -108,8 +108,11 @@ class HttpAppFramework : public trantor::NonCopyable
      * @param resp is the object set to 404 response
      * After calling this method, the resp object is returned
      * by the HttpResponse::newNotFoundResponse() method.
+     * @param set404 if true, the status code of the resp will
+     * be set to 404 automatically
      */
-    virtual HttpAppFramework &setCustom404Page(const HttpResponsePtr &resp) = 0;
+    virtual HttpAppFramework &setCustom404Page(const HttpResponsePtr &resp,
+                                               bool set404 = true) = 0;
 
     /// Get the plugin object registered in the framework
     /**
@@ -582,15 +585,24 @@ class HttpAppFramework : public trantor::NonCopyable
 
     /// Get the document root directory.
     virtual const std::string &getDocumentRoot() const = 0;
+    /**
+     * @brief Set the Static File Headers
+     *
+     * @param headers Each pair object in the vector presents the field name and
+     * field value of a header in an static file response.
+     */
+    virtual HttpAppFramework &setStaticFileHeaders(
+        const std::vector<std::pair<std::string, std::string>> &headers) = 0;
 
     /// Set the path to store uploaded files.
     /**
-     * @param uploadPath is the dictionary where the uploaded files are stored.
-     * if it isn't prefixed with /, ./ or ../, it is relative path of
-     * document_root path, The default value is 'uploads'.
+     * @param uploadPath is the dictionary where the uploaded files are
+     * stored. if it isn't prefixed with /, ./ or ../, it is relative path
+     * of document_root path, The default value is 'uploads'.
      *
      * @note
-     * This operation can be performed by an option in the configuration file.
+     * This operation can be performed by an option in the configuration
+     * file.
      */
     virtual HttpAppFramework &setUploadPath(const std::string &uploadPath) = 0;
 
@@ -890,7 +902,7 @@ class HttpAppFramework : public trantor::NonCopyable
     virtual HttpAppFramework &createDbClient(
         const std::string &dbType,
         const std::string &host,
-        const u_short port,
+        const unsigned short port,
         const std::string &databaseName,
         const std::string &userName,
         const std::string &password,
@@ -909,6 +921,22 @@ class HttpAppFramework : public trantor::NonCopyable
 
     /// Return true is drogon supports SSL(https)
     virtual bool supportSSL() const = 0;
+
+    /**
+     * @brief Get the Current Thread Index whose range is [0, the total number
+     * of IO threads]
+     *
+     * @return size_t If the current thread is the main thread, the number of
+     * the IO threads is returned. If the current thread is a network IO thread,
+     * the index of it in the range [0, the number of IO threads) is returned.
+     * otherwise the maximum value of type size_t is returned.
+     *
+     * @note Basically this method is used for storing thread-related various in
+     * an array and users can use indexes returned by this method to access
+     * them. This is much faster than using a map. If the array is properly
+     * initialized at the beginning, users can access it without locks.
+     */
+    virtual size_t getCurrentThreadIndex() const = 0;
 
   private:
     virtual void registerHttpController(

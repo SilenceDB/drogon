@@ -26,15 +26,21 @@
 
 using namespace drogon;
 
-void StaticFileRouter::init()
+void StaticFileRouter::init(const std::vector<trantor::EventLoop *> &ioloops)
 {
-    _responseCachingMap =
-        std::unique_ptr<CacheMap<std::string, HttpResponsePtr>>(
-            new CacheMap<std::string, HttpResponsePtr>(
-                HttpAppFrameworkImpl::instance().getLoop(),
-                1.0,
-                4,
-                50));  // Max timeout up to about 70 days;
+    // Max timeout up to about 70 days;
+    staticFilesCacheMap_ = decltype(staticFilesCacheMap_)(
+        new IOThreadStorage<std::unique_ptr<CacheMap<std::string, char>>>);
+    staticFilesCacheMap_->init(
+        [&ioloops](std::unique_ptr<CacheMap<std::string, char>> &mapPtr,
+                   size_t i) {
+            assert(i == ioloops[i]->index());
+            mapPtr = std::unique_ptr<CacheMap<std::string, char>>(
+                new CacheMap<std::string, char>(ioloops[i], 1.0, 4, 50));
+        });
+    staticFilesCache_ = decltype(staticFilesCache_)(
+        new IOThreadStorage<
+            std::unordered_map<std::string, HttpResponsePtr>>{});
 }
 
 void StaticFileRouter::route(
@@ -47,7 +53,7 @@ void StaticFileRouter::route(
     {
         std::string filetype = path.substr(pos + 1);
         transform(filetype.begin(), filetype.end(), filetype.begin(), tolower);
-        if (_fileTypeSet.find(filetype) != _fileTypeSet.end())
+        if (fileTypeSet_.find(filetype) != fileTypeSet_.end())
         {
             // LOG_INFO << "file query!" << path;
             std::string filePath =
@@ -62,23 +68,18 @@ void StaticFileRouter::route(
             }
             // find cached response
             HttpResponsePtr cachedResp;
+            auto &cacheMap = staticFilesCache_->getThreadData();
+            auto iter = cacheMap.find(filePath);
+            if (iter != cacheMap.end())
             {
-                std::lock_guard<std::mutex> guard(_staticFilesCacheMutex);
-                if (_staticFilesCache.find(filePath) != _staticFilesCache.end())
-                {
-                    cachedResp = _staticFilesCache[filePath].lock();
-                    if (!cachedResp)
-                    {
-                        _staticFilesCache.erase(filePath);
-                    }
-                }
+                cachedResp = iter->second;
             }
 
             // check last modified time,rfc2616-14.25
             // If-Modified-Since: Mon, 15 Oct 2018 06:26:33 GMT
 
             std::string timeStr;
-            if (_enableLastModify)
+            if (enableLastModify_)
             {
                 if (cachedResp)
                 {
@@ -128,13 +129,14 @@ void StaticFileRouter::route(
 
             if (cachedResp)
             {
+                LOG_TRACE << "Using file cache";
                 HttpAppFrameworkImpl::instance().callCallback(req,
                                                               cachedResp,
                                                               callback);
                 return;
             }
             HttpResponsePtr resp;
-            if (_gzipStaticFlag &&
+            if (gzipStaticFlag_ &&
                 req->getHeaderBy("accept-encoding").find("gzip") !=
                     std::string::npos)
             {
@@ -157,21 +159,28 @@ void StaticFileRouter::route(
                     resp->addHeader("Last-Modified", timeStr);
                     resp->addHeader("Expires", "Thu, 01 Jan 1970 00:00:00 GMT");
                 }
-                // cache the response for 5 seconds by default
-                if (_staticFilesCacheTime >= 0)
+                if (!headers_.empty())
                 {
-                    resp->setExpiredTime(_staticFilesCacheTime);
-                    _responseCachingMap->insert(
-                        filePath, resp, resp->expiredTime(), [=]() {
-                            std::lock_guard<std::mutex> guard(
-                                _staticFilesCacheMutex);
-                            _staticFilesCache.erase(filePath);
-                        });
+                    for (auto &header : headers_)
                     {
-                        std::lock_guard<std::mutex> guard(
-                            _staticFilesCacheMutex);
-                        _staticFilesCache[filePath] = resp;
+                        resp->addHeader(header.first, header.second);
                     }
+                }
+                // cache the response for 5 seconds by default
+                if (staticFilesCacheTime_ >= 0)
+                {
+                    LOG_TRACE << "Save in cache for " << staticFilesCacheTime_
+                              << " seconds";
+                    resp->setExpiredTime(staticFilesCacheTime_);
+                    staticFilesCache_->getThreadData()[filePath] = resp;
+                    staticFilesCacheMap_->getThreadData()->insert(
+                        filePath, 0, staticFilesCacheTime_, [this, filePath]() {
+                            LOG_TRACE << "Erase cache";
+                            assert(staticFilesCache_->getThreadData().find(
+                                       filePath) !=
+                                   staticFilesCache_->getThreadData().end());
+                            staticFilesCache_->getThreadData().erase(filePath);
+                        });
                 }
                 HttpAppFrameworkImpl::instance().callCallback(req,
                                                               resp,
@@ -188,9 +197,9 @@ void StaticFileRouter::route(
 
 void StaticFileRouter::setFileTypes(const std::vector<std::string> &types)
 {
-    _fileTypeSet.clear();
+    fileTypeSet_.clear();
     for (auto const &type : types)
     {
-        _fileTypeSet.insert(type);
+        fileTypeSet_.insert(type);
     }
 }

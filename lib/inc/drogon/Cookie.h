@@ -30,13 +30,10 @@ class Cookie
      * @param value value of the cookie
      */
     Cookie(const std::string &key, const std::string &value)
-        : _key(key), _value(value)
+        : key_(key), value_(value)
     {
     }
     Cookie() = default;
-    ~Cookie()
-    {
-    }
 
     /**
      * @brief Set the Expires Date
@@ -45,7 +42,7 @@ class Cookie
      */
     void setExpiresDate(const trantor::Date &date)
     {
-        _expiresDate = date;
+        expiresDate_ = date;
     }
 
     /**
@@ -53,7 +50,7 @@ class Cookie
      */
     void setHttpOnly(bool only)
     {
-        _httpOnly = only;
+        httpOnly_ = only;
     }
 
     /**
@@ -61,7 +58,7 @@ class Cookie
      */
     void setSecure(bool secure)
     {
-        _secure = secure;
+        secure_ = secure;
     }
 
     /**
@@ -69,7 +66,11 @@ class Cookie
      */
     void setDomain(const std::string &domain)
     {
-        _domain = domain;
+        domain_ = domain;
+    }
+    void setDomain(std::string &&domain)
+    {
+        domain_ = std::move(domain);
     }
 
     /**
@@ -77,7 +78,11 @@ class Cookie
      */
     void setPath(const std::string &path)
     {
-        _path = path;
+        path_ = path;
+    }
+    void setPath(std::string &&path)
+    {
+        path_ = std::move(path);
     }
 
     /**
@@ -85,15 +90,22 @@ class Cookie
      */
     void setKey(const std::string &key)
     {
-        _key = key;
+        key_ = key;
     }
-
+    void setKey(std::string &&key)
+    {
+        key_ = std::move(key);
+    }
     /**
      * @brief Set the value of the cookie.
      */
     void setValue(const std::string &value)
     {
-        _value = value;
+        value_ = value;
+    }
+    void setValue(std::string &&value)
+    {
+        value_ = std::move(value);
     }
 
     /**
@@ -114,7 +126,7 @@ class Cookie
      */
     const trantor::Date &expiresDate() const
     {
-        return _expiresDate;
+        return expiresDate_;
     }
 
     /**
@@ -122,7 +134,7 @@ class Cookie
      */
     const trantor::Date &getExpiresDate() const
     {
-        return _expiresDate;
+        return expiresDate_;
     }
 
     /**
@@ -130,7 +142,7 @@ class Cookie
      */
     const std::string &domain() const
     {
-        return _domain;
+        return domain_;
     }
 
     /**
@@ -138,7 +150,7 @@ class Cookie
      */
     const std::string &getDomain() const
     {
-        return _domain;
+        return domain_;
     }
 
     /**
@@ -146,7 +158,7 @@ class Cookie
      */
     const std::string &path() const
     {
-        return _path;
+        return path_;
     }
 
     /**
@@ -154,7 +166,7 @@ class Cookie
      */
     const std::string &getPath() const
     {
-        return _path;
+        return path_;
     }
 
     /**
@@ -162,7 +174,7 @@ class Cookie
      */
     const std::string &key() const
     {
-        return _key;
+        return key_;
     }
 
     /**
@@ -170,7 +182,7 @@ class Cookie
      */
     const std::string &getKey() const
     {
-        return _key;
+        return key_;
     }
 
     /**
@@ -178,7 +190,7 @@ class Cookie
      */
     const std::string &value() const
     {
-        return _value;
+        return value_;
     }
 
     /**
@@ -186,7 +198,7 @@ class Cookie
      */
     const std::string &getValue() const
     {
-        return _value;
+        return value_;
     }
 
     /**
@@ -197,7 +209,7 @@ class Cookie
      */
     operator bool() const
     {
-        return (!_key.empty()) && (!_value.empty());
+        return (!key_.empty()) && (!value_.empty());
     }
 
     /**
@@ -208,7 +220,7 @@ class Cookie
      */
     bool isHttpOnly() const
     {
-        return _httpOnly;
+        return httpOnly_;
     }
 
     /**
@@ -219,17 +231,17 @@ class Cookie
      */
     bool isSecure() const
     {
-        return _secure;
+        return secure_;
     }
 
   private:
-    trantor::Date _expiresDate;
-    bool _httpOnly = true;
-    bool _secure = false;
-    std::string _domain;
-    std::string _path;
-    std::string _key;
-    std::string _value;
+    trantor::Date expiresDate_;
+    bool httpOnly_{true};
+    bool secure_{false};
+    std::string domain_;
+    std::string path_;
+    std::string key_;
+    std::string value_;
 };
 
 }  // namespace drogon

@@ -33,26 +33,26 @@ class Sqlite3ResultImpl : public ResultImpl
         : ResultImpl(query)
     {
     }
-    virtual size_type size() const noexcept override;
-    virtual row_size_type columns() const noexcept override;
-    virtual const char *columnName(row_size_type number) const override;
-    virtual size_type affectedRows() const noexcept override;
-    virtual row_size_type columnNumber(const char colName[]) const override;
-    virtual const char *getValue(size_type row,
-                                 row_size_type column) const override;
-    virtual bool isNull(size_type row, row_size_type column) const override;
-    virtual field_size_type getLength(size_type row,
-                                      row_size_type column) const override;
+    virtual SizeType size() const noexcept override;
+    virtual RowSizeType columns() const noexcept override;
+    virtual const char *columnName(RowSizeType number) const override;
+    virtual SizeType affectedRows() const noexcept override;
+    virtual RowSizeType columnNumber(const char colName[]) const override;
+    virtual const char *getValue(SizeType row,
+                                 RowSizeType column) const override;
+    virtual bool isNull(SizeType row, RowSizeType column) const override;
+    virtual FieldSizeType getLength(SizeType row,
+                                    RowSizeType column) const override;
     virtual unsigned long long insertId() const noexcept override;
 
   private:
     friend class Sqlite3Connection;
-    std::vector<std::vector<std::shared_ptr<std::string>>> _result;
-    std::string _query;
-    std::vector<std::string> _columnNames;
-    std::unordered_map<std::string, size_t> _columnNameMap;
-    size_t _affectedRows = 0;
-    size_t _insertId = 0;
+    std::vector<std::vector<std::shared_ptr<std::string>>> result_;
+    std::string query_;
+    std::vector<std::string> columnNames_;
+    std::unordered_map<std::string, size_t> columnNamesMap_;
+    size_t affectedRows_{0};
+    size_t insertId_{0};
 };
 }  // namespace orm
 }  // namespace drogon

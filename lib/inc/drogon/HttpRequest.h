@@ -15,8 +15,10 @@
 #pragma once
 
 #include <drogon/utils/string_view.h>
+#include <drogon/DrClassMap.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/Session.h>
+#include <drogon/Attribute.h>
 #include <drogon/UploadFile.h>
 #include <json/json.h>
 #include <trantor/net/InetAddress.h>
@@ -28,12 +30,78 @@
 namespace drogon
 {
 class HttpRequest;
-typedef std::shared_ptr<HttpRequest> HttpRequestPtr;
+using HttpRequestPtr = std::shared_ptr<HttpRequest>;
+
+/**
+ * @brief This template is used to convert a request object to a custom
+ * type object. Users must specialize the template for a particular type.
+ */
+template <typename T>
+T fromRequest(const HttpRequest &req)
+{
+    LOG_ERROR << "You must specialize the fromRequest template for the type of "
+              << DrClassMap::demangle(typeid(T).name());
+    exit(1);
+}
+
+/**
+ * @brief This template is used to create a request object from a custom
+ * type object by calling the newCustomHttpRequest(). Users must specialize
+ * the template for a particular type.
+ */
+template <typename T>
+HttpRequestPtr toRequest(T &&)
+{
+    LOG_ERROR << "You must specialize the toRequest template for the type of "
+              << DrClassMap::demangle(typeid(T).name());
+    exit(1);
+}
+
+template <>
+HttpRequestPtr toRequest(const Json::Value &pJson);
+template <>
+HttpRequestPtr toRequest(Json::Value &&pJson);
+template <>
+inline HttpRequestPtr toRequest(Json::Value &pJson)
+{
+    return toRequest((const Json::Value &)pJson);
+}
+
+template <>
+std::shared_ptr<Json::Value> fromRequest(const HttpRequest &req);
 
 /// Abstract class for webapp developer to get or set the Http request;
 class HttpRequest
 {
   public:
+    /**
+     * @brief This template enables implicit type conversion. For using this
+     * template, user must specialize the fromRequest template. For example a
+     * shared_ptr<Json::Value> specialization version is available above, so
+     * we can use the following code to get a json object:
+     * @code
+       std::shared_ptr<Json::Value> jsonPtr = *requestPtr;
+       @endcode
+     * With this template, user can use their favorite JSON library instead of
+     * the default jsoncpp library or convert the request to an object of any
+     * custom type.
+     */
+    template <typename T>
+    operator T() const
+    {
+        return fromRequest<T>(*this);
+    }
+
+    /**
+     * @brief This template enables explicit type conversion, see the above
+     * template.
+     */
+    template <typename T>
+    T as() const
+    {
+        return fromRequest<T>(*this);
+    }
+
     enum Version
     {
         kUnknown = 0,
@@ -167,6 +235,15 @@ class HttpRequest
         return session();
     }
 
+    /// Get the attributes store to which the request belongs.
+    virtual AttributesPtr attributes() const = 0;
+
+    /// Get the attributes store to which the request belongs.
+    AttributesPtr getAttributes() const
+    {
+        return attributes();
+    }
+
     /// Get parameters of the request.
     virtual const std::unordered_map<std::string, std::string> &parameters()
         const = 0;
@@ -235,6 +312,11 @@ class HttpRequest
     /// Set or get the content type
     virtual void setContentTypeCode(const ContentType type) = 0;
 
+    /// Set the request content-type string, The string
+    /// must contain the header name and CRLF.
+    /// For example, "content-type: text/plain\r\n"
+    virtual void setCustomContentTypeString(const std::string &type) = 0;
+
     /// Add a cookie
     virtual void addCookie(const std::string &key,
                            const std::string &value) = 0;
@@ -267,9 +349,39 @@ class HttpRequest
     static HttpRequestPtr newFileUploadRequest(
         const std::vector<UploadFile> &files);
 
+    /**
+     * @brief Create a custom HTTP request object. For using this template,
+     * users must specialize the toRequest template.
+     */
+    template <typename T>
+    static HttpRequestPtr newCustomHttpRequest(T &&obj)
+    {
+        return toRequest(std::forward<T>(obj));
+    }
+
+    virtual bool isOnSecureConnection() const noexcept = 0;
+
     virtual ~HttpRequest()
     {
     }
 };
+
+template <>
+inline HttpRequestPtr toRequest(const Json::Value &pJson)
+{
+    return HttpRequest::newHttpJsonRequest(pJson);
+}
+
+template <>
+inline HttpRequestPtr toRequest(Json::Value &&pJson)
+{
+    return HttpRequest::newHttpJsonRequest(std::move(pJson));
+}
+
+template <>
+inline std::shared_ptr<Json::Value> fromRequest(const HttpRequest &req)
+{
+    return req.getJsonObject();
+}
 
 }  // namespace drogon

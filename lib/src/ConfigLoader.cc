@@ -101,13 +101,13 @@ ConfigLoader::ConfigLoader(const std::string &configFile)
                   << std::endl;
         exit(1);
     }
-    _configFile = configFile;
+    configFile_ = configFile;
     std::ifstream infile(configFile.c_str(), std::ifstream::in);
     if (infile)
     {
         try
         {
-            infile >> _configJsonRoot;
+            infile >> configJsonRoot_;
         }
         catch (const std::exception &exception)
         {
@@ -229,6 +229,24 @@ static void loadApp(const Json::Value &app)
     if (documentRoot != "")
     {
         drogon::app().setDocumentRoot(documentRoot);
+    }
+    if (!app["static_file_headers"].empty())
+    {
+        if (app["static_file_headers"].isArray())
+        {
+            std::vector<std::pair<std::string, std::string>> headers;
+            for (auto &header : app["static_file_headers"])
+            {
+                headers.emplace_back(std::make_pair<std::string, std::string>(
+                    header["name"].asString(), header["value"].asString()));
+            }
+            drogon::app().setStaticFileHeaders(headers);
+        }
+        else
+        {
+            std::cerr << "The static_file_headers option must be an array\n";
+            exit(1);
+        }
     }
     // upload path
     auto uploadPath = app.get("upload_path", "uploads").asString();
@@ -371,7 +389,7 @@ static void loadDbClients(const Json::Value &dbClients)
         auto isFast = client.get("is_fast", false).asBool();
         drogon::app().createDbClient(type,
                                      host,
-                                     (u_short)port,
+                                     (unsigned short)port,
                                      dbname,
                                      user,
                                      password,
@@ -407,9 +425,9 @@ static void loadSSL(const Json::Value &sslFiles)
 }
 void ConfigLoader::load()
 {
-    // std::cout<<_configJsonRoot<<std::endl;
-    loadApp(_configJsonRoot["app"]);
-    loadSSL(_configJsonRoot["ssl"]);
-    loadListeners(_configJsonRoot["listeners"]);
-    loadDbClients(_configJsonRoot["db_clients"]);
+    // std::cout<<configJsonRoot_<<std::endl;
+    loadApp(configJsonRoot_["app"]);
+    loadSSL(configJsonRoot_["ssl"]);
+    loadListeners(configJsonRoot_["listeners"]);
+    loadDbClients(configJsonRoot_["db_clients"]);
 }

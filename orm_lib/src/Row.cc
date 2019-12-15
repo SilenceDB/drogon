@@ -18,28 +18,28 @@
 #include <drogon/orm/RowIterator.h>
 
 using namespace drogon::orm;
-Row::Row(const Result &r, size_type index) noexcept
-    : _result(r), _index(long(index)), _end(r.columns())
+Row::Row(const Result &r, SizeType index) noexcept
+    : result_(r), index_(long(index)), end_(r.columns())
 {
 }
-Row::size_type Row::size() const
+Row::SizeType Row::size() const
 {
-    return _end;
+    return end_;
 }
-Row::reference Row::operator[](size_type index) const
+Row::Reference Row::operator[](SizeType index) const
 {
-    if (index >= _end)
+    if (index >= end_)
         throw RangeError("The indwx out of range");
     return Field(*this, index);
 }
 
-Row::reference Row::operator[](const char columnName[]) const
+Row::Reference Row::operator[](const char columnName[]) const
 {
-    auto N = _result.columnNumber(columnName);
+    auto N = result_.columnNumber(columnName);
     return Field(*this, N);
 }
 
-Row::reference Row::operator[](const std::string &columnName) const
+Row::Reference Row::operator[](const std::string &columnName) const
 {
     return operator[](columnName.c_str());
 }
@@ -87,13 +87,13 @@ Row::ConstIterator Row::ConstReverseIterator::base() const noexcept
 ConstRowIterator ConstRowIterator::operator++(int)
 {
     ConstRowIterator old(*this);
-    _column++;
+    ++column_;
     return old;
 }
 ConstRowIterator ConstRowIterator::operator--(int)
 {
     ConstRowIterator old(*this);
-    _column--;
+    --column_;
     return old;
 }
 

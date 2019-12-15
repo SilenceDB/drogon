@@ -15,13 +15,16 @@
 #pragma once
 
 #include <drogon/orm/SqlBinder.h>
-
 #include <assert.h>
 #include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
 
+namespace Json
+{
+class Value;
+}
 namespace drogon
 {
 namespace orm
@@ -35,6 +38,7 @@ enum class CompareOperator
     LT,
     LE,
     LIKE,
+    IN,
     IsNull,
     IsNotNull
 };
@@ -52,7 +56,7 @@ class Criteria
      */
     explicit operator bool() const
     {
-        return !_condString.empty();
+        return !conditionString_.empty();
     }
 
     /**
@@ -62,7 +66,7 @@ class Criteria
      */
     std::string criteriaString() const
     {
-        return _condString;
+        return conditionString_;
     }
 
     /**
@@ -78,38 +82,93 @@ class Criteria
     {
         assert(opera != CompareOperator::IsNotNull &&
                opera != CompareOperator::IsNull);
-        _condString = colName;
+        conditionString_ = colName;
         switch (opera)
         {
             case CompareOperator::EQ:
-                _condString += " = $?";
+                conditionString_ += " = $?";
                 break;
             case CompareOperator::NE:
-                _condString += " != $?";
+                conditionString_ += " != $?";
                 break;
             case CompareOperator::GT:
-                _condString += " > $?";
+                conditionString_ += " > $?";
                 break;
             case CompareOperator::GE:
-                _condString += " >= $?";
+                conditionString_ += " >= $?";
                 break;
             case CompareOperator::LT:
-                _condString += " < $?";
+                conditionString_ += " < $?";
                 break;
             case CompareOperator::LE:
-                _condString += " <= $?";
+                conditionString_ += " <= $?";
                 break;
             case CompareOperator::LIKE:
-                _condString += " like $?";
+                conditionString_ += " like $?";
                 break;
             case CompareOperator::IsNull:
             case CompareOperator::IsNotNull:
             default:
                 break;
         }
-        _outputArgumentsFunc = [=](internal::SqlBinder &binder) {
+        outputArgumentsFunc_ = [=](internal::SqlBinder &binder) {
             binder << arg;
         };
+    }
+
+    template <typename T>
+    Criteria(const std::string &colName,
+             const CompareOperator &opera,
+             const std::vector<T> &args)
+    {
+        assert(opera == CompareOperator::IN && args.size() > 0);
+        conditionString_ = colName + " in (";
+        for (size_t i = 0; i < args.size(); ++i)
+        {
+            if (i < args.size() - 1)
+                conditionString_.append("$?,");
+            else
+                conditionString_.append("$?");
+        }
+        conditionString_.append(")");
+        outputArgumentsFunc_ = [args](internal::SqlBinder &binder) {
+            for (auto &arg : args)
+            {
+                binder << arg;
+            }
+        };
+    }
+
+    template <typename T>
+    Criteria(const std::string &colName,
+             const CompareOperator &opera,
+             std::vector<T> &&args)
+    {
+        assert(opera == CompareOperator::IN && args.size() > 0);
+        conditionString_ = colName + " in (";
+        for (size_t i = 0; i < args.size(); ++i)
+        {
+            if (i < args.size() - 1)
+                conditionString_.append("$?,");
+            else
+                conditionString_.append("$?");
+        }
+        conditionString_.append(")");
+        outputArgumentsFunc_ =
+            [args = std::move(args)](internal::SqlBinder &binder) {
+                for (auto &arg : args)
+                {
+                    binder << arg;
+                }
+            };
+    }
+
+    template <typename T>
+    Criteria(const std::string &colName,
+             const CompareOperator &opera,
+             std::vector<T> &args)
+        : Criteria(colName, opera, (const std::vector<T> &)args)
+    {
     }
 
     /**
@@ -140,19 +199,44 @@ class Criteria
     {
         assert(opera == CompareOperator::IsNotNull ||
                opera == CompareOperator::IsNull);
-        _condString = colName;
+        conditionString_ = colName;
         switch (opera)
         {
             case CompareOperator::IsNull:
-                _condString += " is null";
+                conditionString_ += " is null";
                 break;
             case CompareOperator::IsNotNull:
-                _condString += " is not null";
+                conditionString_ += " is not null";
                 break;
             default:
                 break;
         }
     }
+    Criteria(const std::string &colName, CompareOperator &opera)
+        : Criteria(colName, (const CompareOperator &)opera)
+    {
+    }
+    Criteria(const std::string &colName, CompareOperator &&opera)
+        : Criteria(colName, (const CompareOperator &)opera)
+    {
+    }
+
+    /**
+     * @brief Construct a new Criteria object
+     *
+     * @param json A json object representing the criteria
+     * @note the json object must be a array of three items, the first is the
+     * name of the field, the second is the comparison operator and the third is
+     * the value to be compared.
+     * The valid operators are "=","<",">","<=",">=","!=","in"
+     * for example:
+     * ["id","=",1] means 'id = 1'
+     * ["id","!=",null] means 'id is not null'
+     * ["user_name","in",["Tom","Bob"]] means 'user_name in ('Tom', 'Bob')'
+     * ["price","<",1000] means 'price < 1000'
+     */
+    Criteria(const Json::Value &json) noexcept(false);
+
     Criteria()
     {
     }
@@ -165,15 +249,15 @@ class Criteria
      */
     void outputArgs(internal::SqlBinder &binder) const
     {
-        if (_outputArgumentsFunc)
-            _outputArgumentsFunc(binder);
+        if (outputArgumentsFunc_)
+            outputArgumentsFunc_(binder);
     }
 
   private:
     friend const Criteria operator&&(Criteria cond1, Criteria cond2);
     friend const Criteria operator||(Criteria cond1, Criteria cond2);
-    std::string _condString;
-    std::function<void(internal::SqlBinder &)> _outputArgumentsFunc;
+    std::string conditionString_;
+    std::function<void(internal::SqlBinder &)> outputArgumentsFunc_;
 };  // namespace orm
 
 const Criteria operator&&(Criteria cond1, Criteria cond2);

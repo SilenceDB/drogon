@@ -27,57 +27,70 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <dlfcn.h>
-#include <fstream>
 #include <unistd.h>
 
 using namespace drogon_ctl;
-
-std::string nameTransform(const std::string &origName, bool isType)
+static std::string toLower(const std::string &str)
 {
-    auto str = origName;
-    std::transform(str.begin(), str.end(), str.begin(), tolower);
-    std::string::size_type startPos = 0;
-    std::string::size_type pos;
-    std::string ret;
-    do
+    auto ret = str;
+    std::transform(ret.begin(), ret.end(), ret.begin(), tolower);
+    return ret;
+}
+static std::map<std::string, std::vector<Relationship>> getRelationships(
+    const Json::Value &relationships)
+{
+    std::map<std::string, std::vector<Relationship>> ret;
+    auto enabled = relationships.get("enabled", false).asBool();
+    if (!enabled)
+        return ret;
+    auto items = relationships["items"];
+    if (items.isNull())
+        return ret;
+    if (!items.isArray())
     {
-        pos = str.find("_", startPos);
-        if (pos == std::string::npos)
+        std::cerr << "items must be an array\n";
+        exit(1);
+    }
+    for (auto &relationship : items)
+    {
+        try
         {
-            pos = str.find(".", startPos);
+            Relationship r(relationship);
+            ret[r.originalTableName()].push_back(r);
+            if (r.enableReverse() &&
+                r.originalTableName() != r.targetTableName())
+            {
+                auto reverse = r.reverse();
+                ret[reverse.originalTableName()].push_back(reverse);
+            }
         }
-        if (pos != std::string::npos)
-            ret += str.substr(startPos, pos - startPos);
-        else
+        catch (const std::runtime_error &e)
         {
-            ret += str.substr(startPos);
-            break;
+            std::cerr << e.what() << std::endl;
+            exit(1);
         }
-        while (str[pos] == '_' || str[pos] == '.')
-            pos++;
-        if (str[pos] >= 'a' && str[pos] <= 'z')
-            str[pos] += ('A' - 'a');
-        startPos = pos;
-    } while (1);
-    if (isType && ret[0] >= 'a' && ret[0] <= 'z')
-        ret[0] += ('A' - 'a');
+    }
     return ret;
 }
 
 #if USE_POSTGRESQL
-void create_model::createModelClassFromPG(const std::string &path,
-                                          const DbClientPtr &client,
-                                          const std::string &tableName,
-                                          const std::string &schema)
+void create_model::createModelClassFromPG(
+    const std::string &path,
+    const DbClientPtr &client,
+    const std::string &tableName,
+    const std::string &schema,
+    const Json::Value &restfulApiConfig,
+    const std::vector<Relationship> &relationships)
 {
     auto className = nameTransform(tableName, true);
     HttpViewData data;
     data["className"] = className;
-    data["tableName"] = tableName;
+    data["tableName"] = toLower(tableName);
     data["hasPrimaryKey"] = (int)0;
     data["primaryKeyName"] = "";
-    data["dbName"] = _dbname;
+    data["dbName"] = dbname_;
     data["rdbms"] = std::string("postgresql");
+    data["relationships"] = relationships;
     if (schema != "public")
     {
         data["schema"] = schema;
@@ -97,83 +110,81 @@ void create_model::createModelClassFromPG(const std::string &path,
                           << std::endl;
                 return;
             }
-            for (size_t i = 0; i < r.size(); i++)
+            for (size_t i = 0; i < r.size(); ++i)
             {
                 auto row = r[i];
                 ColumnInfo info;
-                info._index = i;
-                info._dbType = "pg";
-                info._colName = row["column_name"].as<std::string>();
-                info._colTypeName = nameTransform(info._colName, true);
-                info._colValName = nameTransform(info._colName, false);
+                info.index_ = i;
+                info.dbType_ = "pg";
+                info.colName_ = row["column_name"].as<std::string>();
+                info.colTypeName_ = nameTransform(info.colName_, true);
+                info.colValName_ = nameTransform(info.colName_, false);
                 auto isNullAble = row["is_nullable"].as<std::string>();
-
-                info._notNull = isNullAble == "YES" ? false : true;
+                info.notNull_ = isNullAble == "YES" ? false : true;
                 auto type = row["data_type"].as<std::string>();
-                info._colDatabaseType = type;
+                info.colDatabaseType_ = type;
                 if (type == "smallint")
                 {
-                    info._colType = "short";
-                    info._colLength = 2;
+                    info.colType_ = "short";
+                    info.colLength_ = 2;
                 }
                 else if (type == "integer")
                 {
-                    info._colType = "int32_t";
-                    info._colLength = 4;
+                    info.colType_ = "int32_t";
+                    info.colLength_ = 4;
                 }
                 else if (type == "bigint" ||
                          type == "numeric")  /// TODO:Use int64 to represent
                                              /// numeric type?
                 {
-                    info._colType = "int64_t";
-                    info._colLength = 8;
+                    info.colType_ = "int64_t";
+                    info.colLength_ = 8;
                 }
                 else if (type == "real")
                 {
-                    info._colType = "float";
-                    info._colLength = sizeof(float);
+                    info.colType_ = "float";
+                    info.colLength_ = sizeof(float);
                 }
                 else if (type == "double precision")
                 {
-                    info._colType = "double";
-                    info._colLength = sizeof(double);
+                    info.colType_ = "double";
+                    info.colLength_ = sizeof(double);
                 }
                 else if (type == "character varying")
                 {
-                    info._colType = "std::string";
+                    info.colType_ = "std::string";
                     if (!row["character_maximum_length"].isNull())
-                        info._colLength =
+                        info.colLength_ =
                             row["character_maximum_length"].as<ssize_t>();
                 }
                 else if (type == "boolean")
                 {
-                    info._colType = "bool";
-                    info._colLength = 1;
+                    info.colType_ = "bool";
+                    info.colLength_ = 1;
                 }
                 else if (type == "date")
                 {
-                    info._colType = "::trantor::Date";
+                    info.colType_ = "::trantor::Date";
                 }
                 else if (type.find("timestamp") != std::string::npos)
                 {
-                    info._colType = "::trantor::Date";
+                    info.colType_ = "::trantor::Date";
                 }
                 else if (type == "bytea")
                 {
-                    info._colType = "std::vector<char>";
+                    info.colType_ = "std::vector<char>";
                 }
                 else
                 {
-                    info._colType = "std::string";
+                    info.colType_ = "std::string";
                 }
                 auto defaultVal = row["column_default"].as<std::string>();
-
                 if (!defaultVal.empty())
                 {
-                    info._hasDefaultVal = true;
+                    info.hasDefaultVal_ = true;
                     if (defaultVal.find("nextval(") == 0)
                     {
-                        info._isAutoVal = true;
+                        info.isAutoVal_ = true;
                     }
                 }
                 cols.push_back(std::move(info));
@@ -183,7 +194,6 @@ void create_model::createModelClassFromPG(const std::string &path,
             std::cerr << e.base().what() << std::endl;
             exit(1);
         };
-
     size_t pkNumber = 0;
     *client << "SELECT \
                 pg_constraint.conname AS pk_name,\
@@ -199,8 +209,6 @@ void create_model::createModelClassFromPG(const std::string &path,
             const std::vector<std::shared_ptr<short>> &pk) {
             if (!isNull)
             {
-                // std::cout << tableName << " Primary key = " << pk.size() <<
-                // std::endl;
                 pkNumber = pk.size();
             }
         } >>
@@ -229,10 +237,10 @@ void create_model::createModelClassFromPG(const std::string &path,
                 data["primaryKeyName"] = colName;
                 for (auto &col : cols)
                 {
-                    if (col._colName == colName)
+                    if (col.colName_ == colName)
                     {
-                        col._isPrimaryKey = true;
-                        data["primaryKeyType"] = col._colType;
+                        col.isPrimaryKey_ = true;
+                        data["primaryKeyType"] = col.colType_;
                     }
                 }
             } >>
@@ -244,7 +252,7 @@ void create_model::createModelClassFromPG(const std::string &path,
     else if (pkNumber > 1)
     {
         std::vector<std::string> pkNames, pkTypes;
-        for (size_t i = 1; i <= pkNumber; i++)
+        for (size_t i = 1; i <= pkNumber; ++i)
         {
             *client << "SELECT \
                 pg_attribute.attname AS colname,\
@@ -260,14 +268,13 @@ void create_model::createModelClassFromPG(const std::string &path,
                 [&](bool isNull, std::string colName, const std::string &type) {
                     if (isNull)
                         return;
-                    // std::cout << "primary key name=" << colName << std::endl;
                     pkNames.push_back(colName);
                     for (auto &col : cols)
                     {
-                        if (col._colName == colName)
+                        if (col.colName_ == colName)
                         {
-                            col._isPrimaryKey = true;
-                            pkTypes.push_back(col._colType);
+                            col.isPrimaryKey_ = true;
+                            pkTypes.push_back(col.colType_);
                         }
                     }
                 } >>
@@ -288,10 +295,14 @@ void create_model::createModelClassFromPG(const std::string &path,
     headerFile << templ->genText(data);
     templ = DrTemplateBase::newTemplate("model_cc.csp");
     sourceFile << templ->genText(data);
+    createRestfulAPIController(data, restfulApiConfig);
 }
-void create_model::createModelFromPG(const std::string &path,
-                                     const DbClientPtr &client,
-                                     const std::string &schema)
+void create_model::createModelFromPG(
+    const std::string &path,
+    const DbClientPtr &client,
+    const std::string &schema,
+    const Json::Value &restfulApiConfig,
+    std::map<std::string, std::vector<Relationship>> &relationships)
 {
     *client << "SELECT a.oid,"
                "a.relname AS name,"
@@ -305,12 +316,18 @@ void create_model::createModelFromPG(const std::string &path,
             << schema << Mode::Blocking >>
         [&](bool isNull,
             size_t oid,
-            const std::string &tableName,
+            std::string &&tableName,
             const std::string &comment) {
             if (!isNull)
             {
                 std::cout << "table name:" << tableName << std::endl;
-                createModelClassFromPG(path, client, tableName, schema);
+
+                createModelClassFromPG(path,
+                                       client,
+                                       tableName,
+                                       schema,
+                                       restfulApiConfig,
+                                       relationships[tableName]);
             }
         } >>
         [](const DrogonDbException &e) {
@@ -321,18 +338,22 @@ void create_model::createModelFromPG(const std::string &path,
 #endif
 
 #if USE_MYSQL
-void create_model::createModelClassFromMysql(const std::string &path,
-                                             const DbClientPtr &client,
-                                             const std::string &tableName)
+void create_model::createModelClassFromMysql(
+    const std::string &path,
+    const DbClientPtr &client,
+    const std::string &tableName,
+    const Json::Value &restfulApiConfig,
+    const std::vector<Relationship> &relationships)
 {
     auto className = nameTransform(tableName, true);
     HttpViewData data;
     data["className"] = className;
-    data["tableName"] = tableName;
+    data["tableName"] = toLower(tableName);
     data["hasPrimaryKey"] = (int)0;
     data["primaryKeyName"] = "";
-    data["dbName"] = _dbname;
+    data["dbName"] = dbname_;
     data["rdbms"] = std::string("mysql");
+    data["relationships"] = relationships;
     std::vector<ColumnInfo> cols;
     int i = 0;
     *client << "desc " + tableName << Mode::Blocking >>
@@ -346,71 +367,83 @@ void create_model::createModelClassFromMysql(const std::string &path,
             if (!isNull)
             {
                 ColumnInfo info;
-                info._index = i;
-                info._dbType = "mysql";
-                info._colName = field;
-                info._colTypeName = nameTransform(info._colName, true);
-                info._colValName = nameTransform(info._colName, false);
-                info._notNull = isNullAble == "YES" ? false : true;
-                info._colDatabaseType = type;
-                info._isPrimaryKey = key == "PRI" ? true : false;
+                info.index_ = i;
+                info.dbType_ = "mysql";
+                info.colName_ = field;
+                info.colTypeName_ = nameTransform(info.colName_, true);
+                info.colValName_ = nameTransform(info.colName_, false);
+                info.notNull_ = isNullAble == "YES" ? false : true;
+                info.colDatabaseType_ = type;
+                info.isPrimaryKey_ = key == "PRI" ? true : false;
                 if (type.find("tinyint") == 0)
                 {
-                    info._colType = "int8_t";
-                    info._colLength = 1;
+                    info.colType_ = "int8_t";
+                    info.colLength_ = 1;
                 }
                 else if (type.find("smallint") == 0)
                 {
-                    info._colType = "int16_t";
-                    info._colLength = 2;
+                    info.colType_ = "int16_t";
+                    info.colLength_ = 2;
                 }
                 else if (type.find("int") == 0)
                 {
-                    info._colType = "int32_t";
-                    info._colLength = 4;
+                    info.colType_ = "int32_t";
+                    info.colLength_ = 4;
                 }
                 else if (type.find("bigint") == 0)
                 {
-                    info._colType = "int64_t";
-                    info._colLength = 8;
+                    info.colType_ = "int64_t";
+                    info.colLength_ = 8;
                 }
                 else if (type.find("float") == 0)
                 {
-                    info._colType = "float";
-                    info._colLength = sizeof(float);
+                    info.colType_ = "float";
+                    info.colLength_ = sizeof(float);
                 }
                 else if (type.find("double") == 0)
                 {
-                    info._colType = "double";
-                    info._colLength = sizeof(double);
+                    info.colType_ = "double";
+                    info.colLength_ = sizeof(double);
                 }
                 else if (type.find("date") == 0 || type.find("datetime") == 0 ||
                          type.find("timestamp") == 0)
                 {
-                    info._colType = "::trantor::Date";
+                    info.colType_ = "::trantor::Date";
                 }
                 else if (type.find("blob") != std::string::npos)
                 {
-                    info._colType = "std::vector<char>";
+                    info.colType_ = "std::vector<char>";
+                }
+                else if (type.find("varchar") != std::string::npos)
+                {
+                    info.colType_ = "std::string";
+                    auto pos1 = type.find("(");
+                    auto pos2 = type.find(")");
+                    if (pos1 != std::string::npos &&
+                        pos2 != std::string::npos && pos2 - pos1 > 1)
+                    {
+                        info.colLength_ =
+                            std::stoll(type.substr(pos1 + 1, pos2 - pos1 - 1));
+                    }
                 }
                 else
                 {
-                    info._colType = "std::string";
+                    info.colType_ = "std::string";
                 }
                 if (type.find("unsigned") != std::string::npos)
                 {
-                    info._colType = "u" + info._colType;
+                    info.colType_ = "u" + info.colType_;
                 }
                 if (!defaultVal.empty())
                 {
-                    info._hasDefaultVal = true;
+                    info.hasDefaultVal_ = true;
                 }
                 if (extra.find("auto_") == 0)
                 {
-                    info._isAutoVal = true;
+                    info.isAutoVal_ = true;
                 }
                 cols.push_back(std::move(info));
-                i++;
+                ++i;
             }
         } >>
         [](const DrogonDbException &e) {
@@ -420,10 +453,10 @@ void create_model::createModelClassFromMysql(const std::string &path,
     std::vector<std::string> pkNames, pkTypes;
     for (auto const &col : cols)
     {
-        if (col._isPrimaryKey)
+        if (col.isPrimaryKey_)
         {
-            pkNames.push_back(col._colName);
-            pkTypes.push_back(col._colType);
+            pkNames.push_back(col.colName_);
+            pkTypes.push_back(col.colType_);
         }
     }
     data["hasPrimaryKey"] = (int)pkNames.size();
@@ -445,28 +478,38 @@ void create_model::createModelClassFromMysql(const std::string &path,
     headerFile << templ->genText(data);
     templ = DrTemplateBase::newTemplate("model_cc.csp");
     sourceFile << templ->genText(data);
+    createRestfulAPIController(data, restfulApiConfig);
 }
-void create_model::createModelFromMysql(const std::string &path,
-                                        const DbClientPtr &client)
+void create_model::createModelFromMysql(
+    const std::string &path,
+    const DbClientPtr &client,
+    const Json::Value &restfulApiConfig,
+    std::map<std::string, std::vector<Relationship>> &relationships)
 {
-    *client << "show tables" << Mode::Blocking >>
-        [&](bool isNull, const std::string &tableName) {
-            if (!isNull)
-            {
-                std::cout << "table name:" << tableName << std::endl;
-                createModelClassFromMysql(path, client, tableName);
-            }
-        } >>
-        [](const DrogonDbException &e) {
-            std::cerr << e.base().what() << std::endl;
-            exit(1);
-        };
+    *client << "show tables" << Mode::Blocking >> [&](bool isNull,
+                                                      std::string &&tableName) {
+        if (!isNull)
+        {
+            std::cout << "table name:" << tableName << std::endl;
+            createModelClassFromMysql(path,
+                                      client,
+                                      tableName,
+                                      restfulApiConfig,
+                                      relationships[tableName]);
+        }
+    } >> [](const DrogonDbException &e) {
+        std::cerr << e.base().what() << std::endl;
+        exit(1);
+    };
 }
 #endif
 #if USE_SQLITE3
-void create_model::createModelClassFromSqlite3(const std::string &path,
-                                               const DbClientPtr &client,
-                                               const std::string &tableName)
+void create_model::createModelClassFromSqlite3(
+    const std::string &path,
+    const DbClientPtr &client,
+    const std::string &tableName,
+    const Json::Value &restfulApiConfig,
+    const std::vector<Relationship> &relationships)
 {
     *client << "SELECT sql FROM sqlite_master WHERE name=? and (type='table' "
                "or type='view');"
@@ -485,12 +528,12 @@ void create_model::createModelClassFromSqlite3(const std::string &path,
                     auto className = nameTransform(tableName, true);
                     HttpViewData data;
                     data["className"] = className;
-                    data["tableName"] = tableName;
+                    data["tableName"] = toLower(tableName);
                     data["hasPrimaryKey"] = (int)0;
                     data["primaryKeyName"] = "";
-                    data["dbName"] = "sqlite3";
+                    data["dbName"] = std::string("sqlite3");
                     data["rdbms"] = std::string("sqlite3");
-                    // std::cout << sql << std::endl;
+                    data["relationships"] = relationships;
                     auto columns = utils::splitString(sql, ",");
                     int i = 0;
                     std::vector<ColumnInfo> cols;
@@ -510,59 +553,57 @@ void create_model::createModelClassFromSqlite3(const std::string &path,
                             (column.find("autoincrement") != std::string::npos);
                         bool primary =
                             (column.find("primary key") != std::string::npos);
-
-                        // std::cout << "field:" << field << std::endl;
                         ColumnInfo info;
-                        info._index = i;
-                        info._dbType = "sqlite3";
-                        info._colName = field;
-                        info._colTypeName = nameTransform(info._colName, true);
-                        info._colValName = nameTransform(info._colName, false);
-                        info._notNull = notnull;
-                        info._colDatabaseType = type;
-                        info._isPrimaryKey = primary;
-                        info._isAutoVal = autoVal;
+                        info.index_ = i;
+                        info.dbType_ = "sqlite3";
+                        info.colName_ = field;
+                        info.colTypeName_ = nameTransform(info.colName_, true);
+                        info.colValName_ = nameTransform(info.colName_, false);
+                        info.notNull_ = notnull;
+                        info.colDatabaseType_ = type;
+                        info.isPrimaryKey_ = primary;
+                        info.isAutoVal_ = autoVal;
 
                         if (type.find("int") != std::string::npos)
                         {
-                            info._colType = "uint64_t";
-                            info._colLength = 8;
+                            info.colType_ = "uint64_t";
+                            info.colLength_ = 8;
                         }
                         else if (type.find("char") != std::string::npos ||
                                  type == "text" || type == "clob")
                         {
-                            info._colType = "std::string";
+                            info.colType_ = "std::string";
                         }
                         else if (type.find("double") != std::string::npos ||
                                  type == "real" || type == "float")
                         {
-                            info._colType = "double";
-                            info._colLength = sizeof(double);
+                            info.colType_ = "double";
+                            info.colLength_ = sizeof(double);
                         }
                         else if (type == "bool")
                         {
-                            info._colType = "bool";
-                            info._colLength = 1;
+                            info.colType_ = "bool";
+                            info.colLength_ = 1;
                         }
                         else if (type == "blob")
                         {
-                            info._colType = "std::vector<char>";
+                            info.colType_ = "std::vector<char>";
                         }
                         else
                         {
-                            info._colType = "std::string";
+                            info.colType_ = "std::string";
                         }
                         cols.push_back(std::move(info));
-                        i++;
+                        ++i;
                     }
 
                     std::vector<std::string> pkNames, pkTypes;
                     for (auto const &col : cols)
                     {
-                        if (col._isPrimaryKey)
+                        if (col.isPrimaryKey_)
                         {
-                            pkNames.push_back(col._colName);
-                            pkTypes.push_back(col._colType);
+                            pkNames.push_back(col.colName_);
+                            pkTypes.push_back(col.colType_);
                         }
                     }
                     data["hasPrimaryKey"] = (int)pkNames.size();
@@ -585,6 +626,7 @@ void create_model::createModelClassFromSqlite3(const std::string &path,
                     headerFile << templ->genText(data);
                     templ = DrTemplateBase::newTemplate("model_cc.csp");
                     sourceFile << templ->genText(data);
+                    createRestfulAPIController(data, restfulApiConfig);
                 }
                 else
                 {
@@ -599,17 +641,24 @@ void create_model::createModelClassFromSqlite3(const std::string &path,
             exit(1);
         };
 }
-void create_model::createModelFromSqlite3(const std::string &path,
-                                          const DbClientPtr &client)
+void create_model::createModelFromSqlite3(
+    const std::string &path,
+    const DbClientPtr &client,
+    const Json::Value &restfulApiConfig,
+    std::map<std::string, std::vector<Relationship>> &relationships)
 {
     *client << "SELECT name FROM sqlite_master WHERE name!='sqlite_sequence' "
                "and (type='table' or type='view') ORDER BY name;"
             << Mode::Blocking >>
-        [=](bool isNull, const std::string &tableName) {
+        [&](bool isNull, std::string &&tableName) mutable {
             if (!isNull)
             {
                 std::cout << "table name:" << tableName << std::endl;
-                createModelClassFromSqlite3(path, client, tableName);
+                createModelClassFromSqlite3(path,
+                                            client,
+                                            tableName,
+                                            restfulApiConfig,
+                                            relationships[tableName]);
             }
         } >>
         [](const DrogonDbException &e) {
@@ -620,10 +669,13 @@ void create_model::createModelFromSqlite3(const std::string &path,
 #endif
 
 void create_model::createModel(const std::string &path,
-                               const Json::Value &config)
+                               const Json::Value &config,
+                               const std::string &singleModelName)
 {
     auto dbType = config.get("rdbms", "no dbms").asString();
     std::transform(dbType.begin(), dbType.end(), dbType.begin(), tolower);
+    auto restfulApiConfig = config["restful_api_controllers"];
+    auto relationships = getRelationships(config["relationships"]);
     if (dbType == "postgresql")
     {
 #if USE_POSTGRESQL
@@ -637,7 +689,7 @@ void create_model::createModel(const std::string &path,
                       << std::endl;
             exit(1);
         }
-        _dbname = dbname;
+        dbname_ = dbname;
         auto user = config.get("user", "").asString();
         if (user == "")
         {
@@ -662,25 +714,56 @@ void create_model::createModel(const std::string &path,
         auto schema = config.get("schema", "public").asString();
         DbClientPtr client = drogon::orm::DbClient::newPgClient(connStr, 1);
         std::cout << "Connect to server..." << std::endl;
-        std::cout << "Source files in the " << path
-                  << " folder will be overwritten, continue(y/n)?\n";
-        auto in = getchar();
-        if (in != 'Y' && in != 'y')
+        if (forceOverwrite_)
         {
-            std::cout << "Abort!" << std::endl;
-            exit(0);
+            sleep(2);
         }
-        auto tables = config["tables"];
-        if (!tables || tables.size() == 0)
-            createModelFromPG(path, client, schema);
         else
         {
-            for (int i = 0; i < (int)tables.size(); i++)
+            std::cout << "Source files in the " << path
+                      << " folder will be overwritten, continue(y/n)?\n";
+            auto in = getchar();
+            (void)getchar();  // get the return key
+            if (in != 'Y' && in != 'y')
             {
-                auto tableName = tables[i].asString();
-                std::cout << "table name:" << tableName << std::endl;
-                createModelClassFromPG(path, client, tableName, schema);
+                std::cout << "Abort!" << std::endl;
+                exit(0);
             }
+        }
+
+        if (singleModelName.empty())
+        {
+            auto tables = config["tables"];
+            if (!tables || tables.size() == 0)
+                createModelFromPG(
+                    path, client, schema, restfulApiConfig, relationships);
+            else
+            {
+                for (int i = 0; i < (int)tables.size(); ++i)
+                {
+                    auto tableName = tables[i].asString();
+                    std::transform(tableName.begin(),
+                                   tableName.end(),
+                                   tableName.begin(),
+                                   tolower);
+                    std::cout << "table name:" << tableName << std::endl;
+                    createModelClassFromPG(path,
+                                           client,
+                                           tableName,
+                                           schema,
+                                           restfulApiConfig,
+                                           relationships[tableName]);
+                }
+            }
+        }
+        else
+        {
+            createModelClassFromPG(path,
+                                   client,
+                                   singleModelName,
+                                   schema,
+                                   restfulApiConfig,
+                                   relationships[singleModelName]);
         }
 #else
         std::cerr
@@ -702,7 +785,7 @@ void create_model::createModel(const std::string &path,
                       << std::endl;
             exit(1);
         }
-        _dbname = dbname;
+        dbname_ = dbname;
         auto user = config.get("user", "").asString();
         if (user == "")
         {
@@ -725,26 +808,58 @@ void create_model::createModel(const std::string &path,
         }
         DbClientPtr client = drogon::orm::DbClient::newMysqlClient(connStr, 1);
         std::cout << "Connect to server..." << std::endl;
-        std::cout << "Source files in the " << path
-                  << " folder will be overwritten, continue(y/n)?\n";
-        auto in = getchar();
-        if (in != 'Y' && in != 'y')
+        if (forceOverwrite_)
         {
-            std::cout << "Abort!" << std::endl;
-            exit(0);
+            sleep(2);
         }
-        auto tables = config["tables"];
-        if (!tables || tables.size() == 0)
-            createModelFromMysql(path, client);
         else
         {
-            for (int i = 0; i < (int)tables.size(); i++)
+            std::cout << "Source files in the " << path
+                      << " folder will be overwritten, continue(y/n)?\n";
+            auto in = getchar();
+            (void)getchar();  // get the return key
+            if (in != 'Y' && in != 'y')
             {
-                auto tableName = tables[i].asString();
-                std::cout << "table name:" << tableName << std::endl;
-                createModelClassFromMysql(path, client, tableName);
+                std::cout << "Abort!" << std::endl;
+                exit(0);
             }
         }
+
+        if (singleModelName.empty())
+        {
+            auto tables = config["tables"];
+            if (!tables || tables.size() == 0)
+                createModelFromMysql(path,
+                                     client,
+                                     restfulApiConfig,
+                                     relationships);
+            else
+            {
+                for (int i = 0; i < (int)tables.size(); ++i)
+                {
+                    auto tableName = tables[i].asString();
+                    std::transform(tableName.begin(),
+                                   tableName.end(),
+                                   tableName.begin(),
+                                   tolower);
+                    std::cout << "table name:" << tableName << std::endl;
+                    createModelClassFromMysql(path,
+                                              client,
+                                              tableName,
+                                              restfulApiConfig,
+                                              relationships[tableName]);
+                }
+            }
+        }
+        else
+        {
+            createModelClassFromMysql(path,
+                                      client,
+                                      singleModelName,
+                                      restfulApiConfig,
+                                      relationships[singleModelName]);
+        }
+
 #else
         std::cerr << "Drogon does not support Mysql, please install MariaDB "
                      "development environment before installing drogon"
@@ -765,26 +880,58 @@ void create_model::createModel(const std::string &path,
         DbClientPtr client =
             drogon::orm::DbClient::newSqlite3Client(connStr, 1);
         std::cout << "Connect..." << std::endl;
-        std::cout << "Source files in the " << path
-                  << " folder will be overwritten, continue(y/n)?\n";
-        auto in = getchar();
-        if (in != 'Y' && in != 'y')
+        if (forceOverwrite_)
         {
-            std::cout << "Abort!" << std::endl;
-            exit(0);
+            sleep(1);
         }
-        auto tables = config["tables"];
-        if (!tables || tables.size() == 0)
-            createModelFromSqlite3(path, client);
         else
         {
-            for (int i = 0; i < (int)tables.size(); i++)
+            std::cout << "Source files in the " << path
+                      << " folder will be overwritten, continue(y/n)?\n";
+            auto in = getchar();
+            (void)getchar();  // get the return key
+            if (in != 'Y' && in != 'y')
             {
-                auto tableName = tables[i].asString();
-                std::cout << "table name:" << tableName << std::endl;
-                createModelClassFromSqlite3(path, client, tableName);
+                std::cout << "Abort!" << std::endl;
+                exit(0);
             }
         }
+
+        if (singleModelName.empty())
+        {
+            auto tables = config["tables"];
+            if (!tables || tables.size() == 0)
+                createModelFromSqlite3(path,
+                                       client,
+                                       restfulApiConfig,
+                                       relationships);
+            else
+            {
+                for (int i = 0; i < (int)tables.size(); ++i)
+                {
+                    auto tableName = tables[i].asString();
+                    std::transform(tableName.begin(),
+                                   tableName.end(),
+                                   tableName.begin(),
+                                   tolower);
+                    std::cout << "table name:" << tableName << std::endl;
+                    createModelClassFromSqlite3(path,
+                                                client,
+                                                tableName,
+                                                restfulApiConfig,
+                                                relationships[tableName]);
+                }
+            }
+        }
+        else
+        {
+            createModelClassFromSqlite3(path,
+                                        client,
+                                        singleModelName,
+                                        restfulApiConfig,
+                                        relationships[singleModelName]);
+        }
+
 #else
         std::cerr << "Drogon does not support Sqlite3, please install Sqlite3 "
                      "development environment before installing drogon"
@@ -803,7 +950,8 @@ void create_model::createModel(const std::string &path,
         exit(1);
     }
 }
-void create_model::createModel(const std::string &path)
+void create_model::createModel(const std::string &path,
+                               const std::string &singleModelName)
 {
     DIR *dp;
     if ((dp = opendir(path.c_str())) == NULL)
@@ -832,7 +980,7 @@ void create_model::createModel(const std::string &path)
         try
         {
             infile >> configJsonRoot;
-            createModel(path, configJsonRoot);
+            createModel(path, configJsonRoot, singleModelName);
         }
         catch (const std::exception &exception)
         {
@@ -851,8 +999,203 @@ void create_model::handleCommand(std::vector<std::string> &parameters)
     {
         std::cerr << "Missing Model path name!" << std::endl;
     }
+    std::string singleModelName;
+    for (auto iter = parameters.begin(); iter != parameters.end(); ++iter)
+    {
+        if ((*iter).find("--table=") == 0)
+        {
+            singleModelName = (*iter).substr(8);
+            parameters.erase(iter);
+            break;
+        }
+    }
+    for (auto iter = parameters.begin(); iter != parameters.end(); ++iter)
+    {
+        if ((*iter) == "-f")
+        {
+            forceOverwrite_ = true;
+            parameters.erase(iter);
+            break;
+        }
+    }
     for (auto const &path : parameters)
     {
-        createModel(path);
+        createModel(path, singleModelName);
+    }
+}
+
+void create_model::createRestfulAPIController(
+    const DrTemplateData &tableInfo,
+    const Json::Value &restfulApiConfig)
+{
+    if (restfulApiConfig.isNull())
+        return;
+    if (!restfulApiConfig.get("enabled", false).asBool())
+    {
+        return;
+    }
+    auto genBaseOnly =
+        restfulApiConfig.get("generate_base_only", false).asBool();
+    auto modelClassName = tableInfo.get<std::string>("className");
+    std::regex regex("\\*");
+    auto resource = std::regex_replace(
+        restfulApiConfig.get("resource_uri", "/*").asString(),
+        regex,
+        modelClassName);
+    std::transform(resource.begin(), resource.end(), resource.begin(), tolower);
+    auto ctrlClassName =
+        std::regex_replace(restfulApiConfig.get("class_name", "/*").asString(),
+                           regex,
+                           modelClassName);
+    std::regex regex1("::");
+    std::string ctlName =
+        std::regex_replace(ctrlClassName, regex1, std::string("_"));
+    auto v = utils::splitString(ctrlClassName, "::");
+
+    drogon::DrTemplateData data;
+    data.insert("className", v[v.size() - 1]);
+    v.pop_back();
+    data.insert("namespaceVector", v);
+    data.insert("resource", resource);
+    data.insert("fileName", ctlName);
+    data.insert("tableName", tableInfo.get<std::string>("tableName"));
+    data.insert("tableInfo", tableInfo);
+    auto filters = restfulApiConfig["filters"];
+    if (filters.isNull() || filters.empty() || !filters.isArray())
+    {
+        data.insert("filters", "");
+    }
+    else
+    {
+        std::string filtersStr;
+        for (auto &filterName : filters)
+        {
+            filtersStr += ",\"";
+            filtersStr.append(filterName.asString());
+            filtersStr += '"';
+        }
+        data.insert("filters", filtersStr);
+    }
+    auto dbClientConfig = restfulApiConfig["db_client"];
+    if (dbClientConfig.isNull() || dbClientConfig.empty())
+    {
+        data.insertAsString("dbClientName", "default");
+        data.insert("isFastDbClient", false);
+    }
+    else
+    {
+        auto clientName = dbClientConfig.get("name", "default").asString();
+        auto isFast = dbClientConfig.get("is_fast", false).asBool();
+        data.insertAsString("dbClientName", clientName);
+        data.insert("isFastDbClient", isFast);
+    }
+    auto dir = restfulApiConfig.get("directory", "controllers").asString();
+    if (dir[dir.length() - 1] != '/')
+    {
+        dir += '/';
+    }
+    {
+        std::string headFileName = dir + ctlName + "Base.h";
+        std::string sourceFilename = dir + ctlName + "Base.cc";
+        // {
+        //     std::ifstream iHeadFile(headFileName.c_str(), std::ifstream::in);
+        //     std::ifstream iSourceFile(sourceFilename.c_str(),
+        //                               std::ifstream::in);
+
+        //     if (iHeadFile || iSourceFile)
+        //     {
+        //         std::cout << "The " << headFileName << " and " <<
+        //         sourceFilename
+        //                   << " you want to create already exist, "
+        //                      "overwrite it(y/n)?"
+        //                   << std::endl;
+        //         auto in = getchar();
+        //         (void)getchar();  // get the return key
+        //         if (in != 'Y' && in != 'y')
+        //         {
+        //             std::cout << "Abort!" << std::endl;
+        //             exit(0);
+        //         }
+        //     }
+        // }
+        std::ofstream oHeadFile(headFileName.c_str(), std::ofstream::out);
+        std::ofstream oSourceFile(sourceFilename.c_str(), std::ofstream::out);
+        if (!oHeadFile || !oSourceFile)
+        {
+            perror("");
+            exit(1);
+        }
+        try
+        {
+            auto templ =
+                DrTemplateBase::newTemplate("restful_controller_base_h.csp");
+            oHeadFile << templ->genText(data);
+            templ =
+                DrTemplateBase::newTemplate("restful_controller_base_cc.csp");
+            oSourceFile << templ->genText(data);
+        }
+        catch (const std::exception &err)
+        {
+            std::cerr << err.what() << std::endl;
+            exit(1);
+        }
+        std::cout << "create a http restful API controller base class:"
+                  << ctrlClassName << "Base" << std::endl;
+        std::cout << "file name: " << headFileName << ", " << sourceFilename
+                  << std::endl
+                  << std::endl;
+    }
+    if (!genBaseOnly)
+    {
+        std::string headFileName = dir + ctlName + ".h";
+        std::string sourceFilename = dir + ctlName + ".cc";
+        if (!forceOverwrite_)
+        {
+            std::ifstream iHeadFile(headFileName.c_str(), std::ifstream::in);
+            std::ifstream iSourceFile(sourceFilename.c_str(),
+                                      std::ifstream::in);
+
+            if (iHeadFile || iSourceFile)
+            {
+                std::cout << "The " << headFileName << " and " << sourceFilename
+                          << " you want to create already exist, "
+                             "overwrite them(y/n)?"
+                          << std::endl;
+                auto in = getchar();
+                (void)getchar();  // get the return key
+                if (in != 'Y' && in != 'y')
+                {
+                    std::cout << "Abort!" << std::endl;
+                    exit(0);
+                }
+            }
+        }
+        std::ofstream oHeadFile(headFileName.c_str(), std::ofstream::out);
+        std::ofstream oSourceFile(sourceFilename.c_str(), std::ofstream::out);
+        if (!oHeadFile || !oSourceFile)
+        {
+            perror("");
+            exit(1);
+        }
+        try
+        {
+            auto templ =
+                DrTemplateBase::newTemplate("restful_controller_custom_h.csp");
+            oHeadFile << templ->genText(data);
+            templ =
+                DrTemplateBase::newTemplate("restful_controller_custom_cc.csp");
+            oSourceFile << templ->genText(data);
+        }
+        catch (const std::exception &err)
+        {
+            std::cerr << err.what() << std::endl;
+            exit(1);
+        }
+
+        std::cout << "create a http restful API controller class: "
+                  << ctrlClassName << std::endl;
+        std::cout << "file name: " << headFileName << ", " << sourceFilename
+                  << std::endl
+                  << std::endl;
     }
 }

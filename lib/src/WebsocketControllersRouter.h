@@ -47,13 +47,12 @@ class WebsocketControllersRouter : public trantor::NonCopyable
   private:
     struct WebSocketControllerRouterItem
     {
-        WebSocketControllerBasePtr _controller;
-        std::vector<std::string> _filterNames;
-        std::vector<std::shared_ptr<HttpFilterBase>> _filters;
+        WebSocketControllerBasePtr controller_;
+        std::vector<std::string> filterNames_;
+        std::vector<std::shared_ptr<HttpFilterBase>> filters_;
     };
     std::unordered_map<std::string, WebSocketControllerRouterItem>
-        _websockCtrlMap;
-    std::mutex _websockCtrlMutex;
+        websockCtrlMap_;
 
     void doControllerHandler(
         const WebSocketControllerBasePtr &ctrlPtr,

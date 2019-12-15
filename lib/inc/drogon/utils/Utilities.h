@@ -19,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <set>
 
 namespace drogon
 {
@@ -46,6 +47,8 @@ std::vector<char> hexToBinaryVector(const char *ptr, size_t length);
 /// Split the string into multiple separated strings.
 std::vector<std::string> splitString(const std::string &str,
                                      const std::string &separator);
+std::set<std::string> splitStringToSet(const std::string &str,
+                                       const std::string &separator);
 
 /// Get UUID string.
 std::string getUuid();
@@ -55,7 +58,8 @@ std::string base64Encode(const unsigned char *bytes_to_encode,
                          unsigned int in_len);
 
 /// Decode the base64 format string.
-std::string base64Decode(std::string const &encoded_string);
+std::string base64Decode(const std::string &encoded_string);
+std::vector<char> base64DecodeToVector(const std::string &encoded_string);
 
 /// Check if the string need decoding
 bool needUrlDecoding(const char *begin, const char *end);
@@ -72,7 +76,9 @@ inline std::string urlDecode(const string_view &szToDecode)
     auto begin = szToDecode.data();
     return urlDecode(begin, begin + szToDecode.length());
 }
-std::string urlEncode(const std::string &str);
+
+std::string urlEncode(const std::string &);
+std::string urlEncodeComponent(const std::string &);
 
 /// Commpress or decompress data using gzip lib.
 /**

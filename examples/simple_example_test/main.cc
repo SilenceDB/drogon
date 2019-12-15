@@ -45,7 +45,7 @@ void outputGood(const HttpRequestPtr &req, bool isHttps)
     static std::mutex mtx;
     {
         std::lock_guard<std::mutex> lock(mtx);
-        i++;
+        ++i;
         std::cout << i << GREEN << '\t' << "Good" << '\t' << RED
                   << req->methodString() << " " << req->path();
         if (isHttps)
@@ -164,14 +164,14 @@ void doTest(const HttpClientPtr &client,
     /// Post json
     Json::Value json;
     json["request"] = "json";
-    req = HttpRequest::newHttpJsonRequest(json);
+    req = HttpRequest::newCustomHttpRequest(json);
     req->setMethod(drogon::Post);
     req->setPath("/api/v1/apitest/json");
     client->sendRequest(req,
                         [=](ReqResult result, const HttpResponsePtr &resp) {
                             if (result == ReqResult::Ok)
                             {
-                                auto ret = resp->getJsonObject();
+                                std::shared_ptr<Json::Value> ret = *resp;
                                 if (ret && (*ret)["result"].asString() == "ok")
                                 {
                                     outputGood(req, isHttps);
@@ -189,6 +189,59 @@ void doTest(const HttpClientPtr &client,
                                 exit(1);
                             }
                         });
+    // Post json again
+    req = HttpRequest::newHttpJsonRequest(json);
+    req->setMethod(drogon::Post);
+    req->setPath("/api/v1/apitest/json");
+    client->sendRequest(req,
+                        [=](ReqResult result, const HttpResponsePtr &resp) {
+                            if (result == ReqResult::Ok)
+                            {
+                                std::shared_ptr<Json::Value> ret = *resp;
+                                if (ret && (*ret)["result"].asString() == "ok")
+                                {
+                                    outputGood(req, isHttps);
+                                }
+                                else
+                                {
+                                    LOG_DEBUG << resp->getBody();
+                                    LOG_ERROR << "Error!";
+                                    exit(1);
+                                }
+                            }
+                            else
+                            {
+                                LOG_ERROR << "Error!";
+                                exit(1);
+                            }
+                        });
+    // Post json again
+    req = HttpRequest::newHttpJsonRequest(json);
+    req->setMethod(drogon::Post);
+    req->setPath("/api/v1/apitest/json");
+    client->sendRequest(req,
+                        [=](ReqResult result, const HttpResponsePtr &resp) {
+                            if (result == ReqResult::Ok)
+                            {
+                                std::shared_ptr<Json::Value> ret = *resp;
+                                if (ret && (*ret)["result"].asString() == "ok")
+                                {
+                                    outputGood(req, isHttps);
+                                }
+                                else
+                                {
+                                    LOG_DEBUG << resp->getBody();
+                                    LOG_ERROR << "Error!";
+                                    exit(1);
+                                }
+                            }
+                            else
+                            {
+                                LOG_ERROR << "Error!";
+                                exit(1);
+                            }
+                        });
+
     /// 1 Get /
     req = HttpRequest::newHttpRequest();
     req->setMethod(drogon::Get);
@@ -901,6 +954,34 @@ void doTest(const HttpClientPtr &client,
     req->setPath("/api/v1/apitest/form");
     req->setParameter("k1", "1");
     req->setParameter("k2", "安");
+    req->setParameter("k3", "test@example.com");
+    client->sendRequest(req,
+                        [=](ReqResult result, const HttpResponsePtr &resp) {
+                            if (result == ReqResult::Ok)
+                            {
+                                auto ret = resp->getJsonObject();
+                                if (ret && (*ret)["result"].asString() == "ok")
+                                {
+                                    outputGood(req, isHttps);
+                                }
+                                else
+                                {
+                                    LOG_DEBUG << resp->getBody();
+                                    LOG_ERROR << "Error!";
+                                    exit(1);
+                                }
+                            }
+                            else
+                            {
+                                LOG_ERROR << "Error!";
+                                exit(1);
+                            }
+                        });
+
+    /// Test attributes
+    req = HttpRequest::newHttpRequest();
+    req->setMethod(drogon::Get);
+    req->setPath("/api/v1/apitest/attrs");
     client->sendRequest(req,
                         [=](ReqResult result, const HttpResponsePtr &resp) {
                             if (result == ReqResult::Ok)
